@@ -120,16 +120,9 @@ class StreamBroadcaster:
             self.clients.discard(q)
 
     def broadcast(self, chunk):
-        if not chunk:
+        if not chunk or not self.clients:
             return
         with self.lock:
-            self.bytes_counter += len(chunk)
-            now = time.monotonic()
-            dt = now - self.last_rate_ts
-            if dt >= 0.5:
-                self.current_mbps = (self.bytes_counter * 8.0) / (dt * 1_000_000.0)
-                self.bytes_counter = 0
-                self.last_rate_ts = now
             dead = []
             for q in self.clients:
                 try:
@@ -171,10 +164,6 @@ def global_wasapi_capture_thread():
                 def cb(in_data, frame_count, time_info, status):
                     try:
                         AUDIO_QUEUE.put_nowait(in_data)
-                        # Szybki próbnik amplitudy audio dla paska VU w GUI (co 64 bajty)
-                        if in_data:
-                            peak = max(abs(int.from_bytes(in_data[i:i+2], "little", signed=True)) for i in range(0, min(len(in_data) - 1, 512), 32))
-                            BROADCASTER.audio_level = min(1.0, peak / 24000.0)
                     except queue.Full:
                         try:
                             AUDIO_QUEUE.get_nowait()
@@ -201,13 +190,11 @@ def global_wasapi_capture_thread():
 
 def feed_stdin_audio(ffmpeg_stdin):
     """
-    Podaje próbki audio do FFmpega:
-    - Gdy na komputerze gra dźwięk (WASAPI dostarcza próbki), przekazuje je bezpośrednio
-      w rytmie zegara karty dźwiękowej Realtek (ZERO wtrącania sztucznej ciszy w środek muzyki!).
-    - Dopiero gdy na komputerze zapadnie cisza (>55 ms bez próbek z WASAPI), płynnie
-      dogenerowuje ramki ciszy zgodnie z zegarem time.perf_counter().
+    Podaje próbki audio do FFmpega przy minimalnym obciążeniu CPU/GIL:
+    - Gdy gra dźwięk (WASAPI), przekazuje go bezpośrednio.
+    - Gdy panuje cisza, wysyła paczki ciszy 40 ms bez aktywnego odpytywania (zero busy-wait).
     """
-    silence_20ms = b"\x00" * (960 * 2 * 2)  # 20 ms @ 48000 Hz stereo s16le
+    silence_40ms = b"\x00" * (1920 * 2 * 2)  # 40 ms @ 48000 Hz stereo s16le
     while not AUDIO_QUEUE.empty():
         try:
             AUDIO_QUEUE.get_nowait()
@@ -216,25 +203,22 @@ def feed_stdin_audio(ffmpeg_stdin):
 
     while RUNNING:
         try:
-            # Czekaj naturalnie na paczkę z karty dźwiękowej Realtek (maks. 45 ms)
             chunk = AUDIO_QUEUE.get(timeout=0.045)
             ffmpeg_stdin.write(chunk)
             ffmpeg_stdin.flush()
         except queue.Empty:
-            # Na komputerze nic obecnie nie gra -> podawaj ciszę ze stałym zegarem 20 ms
-            BROADCASTER.audio_level = 0.0
             t_sil = time.perf_counter()
             sil_sent = 0
             while RUNNING and AUDIO_QUEUE.empty():
-                target = int((time.perf_counter() - t_sil) * 50.0) + 1
+                target = int((time.perf_counter() - t_sil) * 25.0) + 1
                 while sil_sent < target and AUDIO_QUEUE.empty():
                     try:
-                        ffmpeg_stdin.write(silence_20ms)
+                        ffmpeg_stdin.write(silence_40ms)
                         ffmpeg_stdin.flush()
                         sil_sent += 1
                     except (BrokenPipeError, OSError, ValueError):
                         return
-                time.sleep(0.004)
+                time.sleep(0.025)
         except (BrokenPipeError, OSError, ValueError):
             return
 
@@ -467,14 +451,13 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
         )
         t_launch = time.perf_counter()
         no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
-        high_prio = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080) if os.name == "nt" else 0
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
-            creationflags=no_win | high_prio,
+            creationflags=no_win,
         )
         BROADCASTER.ffmpeg_proc = proc
 
@@ -483,8 +466,8 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
         try:
             stdout_fd = proc.stdout.fileno()
             while RUNNING:
-                # 3760 bajtów = dokładnie 20 * 188 bajtów pakietu MPEG-TS
-                chunk = os.read(stdout_fd, 3760)
+                # 15040 bajtów = 80 * 188 bajtów pakietu MPEG-TS (4x mniejszy narzut GIL w Pythonie)
+                chunk = os.read(stdout_fd, 15040)
                 if not chunk:
                     break
                 BROADCASTER.broadcast(chunk)
