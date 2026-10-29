@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Universal DLNA Full HD 1080p60 Screen + Audio Streamer
+title Universal DLNA Full HD 1080p60 Screen + Audio Streamer (GUI)
 cd /d "%~dp0"
 
 :: Automatyczne sprawdzenie i instalacja bibliotek przy pierwszym uruchomieniu na nowym PC
@@ -10,5 +10,4 @@ if %errorlevel% neq 0 (
     pip install -r requirements.txt
 )
 
-python netcast_hw_streamer.py --port 8000 --monitor 1 --fps 60 --height 1080 --bitrate 7M --encoder auto
-pause
+start "" pythonw netcast_gui.py

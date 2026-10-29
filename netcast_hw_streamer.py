@@ -58,22 +58,43 @@ class StreamBroadcaster:
         self.clients = set()
         self.active_monitor = 1
         self.active_height = 1080
+        self.active_fps = 60
+        self.active_bitrate = "6M"
+        self.active_encoder = "auto"
         self.use_ddagrab = True
         self.ffmpeg_proc = None
+        self.status_callback = None
 
-    def set_stream_profile(self, mon_idx, height=None):
+    def notify_status(self, msg):
+        print(msg)
+        if self.status_callback:
+            try:
+                self.status_callback(msg.strip())
+            except Exception:
+                pass
+
+    def set_stream_profile(self, mon_idx, height=None, fps=None, bitrate=None, encoder=None):
         with self.lock:
             changed = False
-            if self.active_monitor != mon_idx:
+            if mon_idx is not None and self.active_monitor != mon_idx:
                 self.active_monitor = mon_idx
                 changed = True
             if height is not None and self.active_height != height:
                 self.active_height = height
                 changed = True
+            if fps is not None and self.active_fps != fps:
+                self.active_fps = fps
+                changed = True
+            if bitrate is not None and self.active_bitrate != bitrate:
+                self.active_bitrate = bitrate
+                changed = True
+            if encoder is not None and self.active_encoder != encoder:
+                self.active_encoder = encoder
+                changed = True
             if changed:
-                print(
-                    f"  [Profil] Przełączanie na: Monitor {self.active_monitor}, "
-                    f"Rozdzielczość {self.active_height}p @ 60 FPS"
+                self.notify_status(
+                    f"  [Profil] Przełączanie: Monitor {self.active_monitor}, "
+                    f"{self.active_height}p @ {self.active_fps} FPS ({self.active_bitrate})"
                 )
                 if self.ffmpeg_proc:
                     try:
@@ -318,12 +339,13 @@ def detect_best_h264_encoder(ffmpeg_exe, requested="auto"):
 # ==============================================================================
 # Koder FFmpeg: Uniwersalny potok GPU/CPU + WASAPI Audio
 # ==============================================================================
-def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M", encoder_pref="auto"):
+def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", encoder_pref="auto"):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     BROADCASTER.active_monitor = default_monitor
     BROADCASTER.active_height = height
-    enc_id, enc_label, enc_builder = detect_best_h264_encoder(ffmpeg_exe, encoder_pref)
-    print(f"  [Koder Wideo] Wybrano automatycznie: {enc_label} ({enc_id})")
+    BROADCASTER.active_fps = fps
+    BROADCASTER.active_bitrate = bitrate
+    BROADCASTER.active_encoder = encoder_pref
 
     # Podnieś priorytet procesu Pythona, aby edytory Unity/gry nie przywłaszczały czasu CPU
     try:
@@ -335,6 +357,10 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M", e
     while RUNNING:
         mon_idx = BROADCASTER.active_monitor
         cur_height = BROADCASTER.active_height
+        actual_fps = BROADCASTER.active_fps
+        cur_bitrate = BROADCASTER.active_bitrate
+        enc_id, enc_label, enc_builder = detect_best_h264_encoder(ffmpeg_exe, BROADCASTER.active_encoder)
+
         offset_x, offset_y, grab_w, grab_h = 0, 0, 1920, 1080
         try:
             import mss
@@ -351,9 +377,6 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M", e
         out_w = (out_w // 2) * 2
         if out_w > 1920:
             out_w = 1920
-
-        actual_fps = fps
-        cur_bitrate = "6M" if out_h >= 1080 else "4500k"
 
         # Przechwytywanie przez DirectX 11 ddagrab (z automatycznym fallbackiem do gdigrab)
         if BROADCASTER.use_ddagrab and mon_idx in (1, 2):
@@ -844,20 +867,51 @@ def push_stream_to_tv_dlna(control_url, stream_url):
         )
         time.sleep(0.5)
         send_soap("Play", "<InstanceID>0</InstanceID><Speed>1</Speed>")
-        print(f"  [DLNA Push] Telewizor przyjął strumień: {stream_url}")
+        BROADCASTER.notify_status(f"  [DLNA Push] Telewizor przyjął strumień: {stream_url}")
         return True
     except urllib.error.HTTPError as he:
         err_txt = he.read().decode("utf-8", errors="ignore")
         if "701" in err_txt:
-            print(
-                "  [DLNA Push] Telewizor ma obecnie otwartą przeglądarkę/aplikację Smart (kod 701).\n"
-                "              -> Naciśnij [EXIT] na pilocie TV lub wybierz '[PC] Pulpit RTX 60FPS' w menu INPUT / Smart Share!"
+            BROADCASTER.notify_status(
+                "  [DLNA Push] Telewizor ma obecnie otwartą aplikację Smart (kod 701) -> Naciśnij [EXIT] na pilocie TV!"
             )
         else:
-            print(f"  [DLNA Push] Odpowiedź TV ({he.code})")
+            BROADCASTER.notify_status(f"  [DLNA Push] Odpowiedź TV ({he.code})")
     except Exception as exc:
-        print(f"  [DLNA Push] {exc}")
+        BROADCASTER.notify_status(f"  [DLNA Push] {exc}")
     return False
+
+
+def stop_tv_dlna(control_url):
+    """Zatrzymuje odtwarzanie DLNA na telewizorze."""
+    if not control_url:
+        return False
+    envelope = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+        's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+        "<s:Body>"
+        '<u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
+        "<InstanceID>0</InstanceID>"
+        "</u:Stop>"
+        "</s:Body></s:Envelope>"
+    ).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            control_url,
+            data=envelope,
+            headers={
+                "Content-Type": 'text/xml; charset="utf-8"',
+                "SOAPAction": '"urn:schemas-upnp-org:service:AVTransport:1#Stop"',
+                "Connection": "close",
+            },
+        )
+        urllib.request.urlopen(req, timeout=3).read()
+        BROADCASTER.notify_status("  [DLNA Stop] Zatrzymano odtwarzanie na telewizorze.")
+        return True
+    except Exception as exc:
+        BROADCASTER.notify_status(f"  [DLNA Stop] {exc}")
+        return False
 
 
 # ==============================================================================

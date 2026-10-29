@@ -33,10 +33,19 @@ Zamiast korzystać z powolnej wbudowanej przeglądarki WebKit, projekt wykorzyst
 
 ## Uruchomienie
 
-Kliknij dwukrotnie **`uruchom_stream.bat`** lub uruchom z terminala:
+### 1. Interfejs okienkowy (GUI) – Zalecany
+Kliknij dwukrotnie **`uruchom_stream.bat`** (lub uruchom `python netcast_gui.py`).
+Otworzy się ciemne okno aplikacji pozwalające jednym kliknięciem:
+- wybrać telewizor DLNA z listy wykrytych odbiorników w sieci LAN,
+- przełączać monitor (`Monitor 1` / `Monitor 2` / `Oba monitory`) w locie,
+- zmieniać rozdzielczość (`Full HD 1080p` / `HD 720p`), płynność (`60 FPS` / `30 FPS`), bitrate i koder GPU (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
+- włączać (`▶ WŁĄCZ STREAM`) oraz zatrzymywać (`⏹ ZATRZYMAJ NA TV`) strumień.
+
+### 2. Tryb konsolowy (CLI)
+Kliknij dwukrotnie **`uruchom_konsole.bat`** lub uruchom z terminala:
 
 ```bash
-python netcast_hw_streamer.py --port 8000 --monitor 1 --fps 60 --height 1080 --bitrate 7M
+python netcast_hw_streamer.py --port 8000 --monitor 1 --fps 60 --height 1080 --bitrate 6M --encoder auto
 ```
 
 > **Wskazówka:** Upewnij się, że telewizor jest na zwykłym kanale TV lub wejściu HDMI (wyjdź z menu Smart Home / Przeglądarki przyciskiem `EXIT` na pilocie), aby telewizor automatycznie przyjął strumień przez `AVTransport1`.
