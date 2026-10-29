@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lg_app_Wait>
+    <app_info>
+        <id>100001</id>
+        <name>PC Screen Streamer</name>
+        <version>1.0.0</version>
+        <type>WEB</type>
+        <resolution>1920x1080</resolution>
+        <url>index.html</url>
+        <icon>icon.png</icon>
+    </app_info>
+</lg_app_Wait>
