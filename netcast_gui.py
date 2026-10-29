@@ -26,7 +26,13 @@ import netcast_hw_streamer as core
 
 
 def enable_dark_titlebar_and_dpi(root):
-    """Włącza skalowanie High-DPI oraz ciemny pasek tytułowy okna w Windows 10/11."""
+    """Ukrywa ewentualne okno konsoli, włącza High-DPI oraz ciemny pasek tytułowy w Windows 10/11."""
+    try:
+        hwnd_con = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd_con:
+            ctypes.windll.user32.ShowWindow(hwnd_con, 0)  # SW_HIDE
+    except Exception:
+        pass
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
@@ -41,7 +47,7 @@ def enable_dark_titlebar_and_dpi(root):
 
 
 def free_port_if_in_use(port=8000):
-    """Jeśli w tle działa poprzednia instancja konsolowa na porcie 8000, zwalnia port."""
+    """Jeśli w tle działa poprzednia instancja konsolowa na porcie 8000, zwalnia port bez otwierania okna."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.3)
     in_use = s.connect_ex(("127.0.0.1", port)) == 0
@@ -49,14 +55,22 @@ def free_port_if_in_use(port=8000):
     if not in_use:
         return
     try:
-        out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True).decode("utf-8", errors="ignore")
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+        out = subprocess.check_output(
+            f"netstat -ano | findstr :{port}", shell=True, creationflags=no_win
+        ).decode("utf-8", errors="ignore")
         my_pid = os.getpid()
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 5 and "LISTENING" in line.upper():
                 pid = int(parts[-1])
                 if pid != my_pid and pid > 0:
-                    subprocess.run(f"taskkill /PID {pid} /F /T", shell=True, capture_output=True)
+                    subprocess.run(
+                        f"taskkill /PID {pid} /F /T",
+                        shell=True,
+                        capture_output=True,
+                        creationflags=no_win,
+                    )
         time.sleep(0.4)
     except Exception:
         pass

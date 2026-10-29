@@ -325,7 +325,8 @@ def detect_best_h264_encoder(ffmpeg_exe, requested="auto"):
             "NUL" if os.name == "nt" else "/dev/null",
         ]
         try:
-            r = subprocess.run(test_cmd, capture_output=True, timeout=3)
+            no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+            r = subprocess.run(test_cmd, capture_output=True, timeout=3, creationflags=no_win)
             if r.returncode == 0:
                 DETECTED_ENCODER = (enc_id, label, builder)
                 return DETECTED_ENCODER
@@ -447,13 +448,15 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
             f"{out_w}x{out_h} @ {actual_fps} FPS ({cur_bitrate}) + Audio WASAPI"
         )
         t_launch = time.perf_counter()
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+        high_prio = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080) if os.name == "nt" else 0
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
-            creationflags=getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080),
+            creationflags=no_win | high_prio,
         )
         BROADCASTER.ffmpeg_proc = proc
 
