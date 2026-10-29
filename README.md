@@ -33,13 +33,13 @@ Zamiast korzystać z powolnej wbudowanej przeglądarki WebKit, projekt wykorzyst
 
 ## Uruchomienie
 
-### 1. Interfejs okienkowy (GUI) – Zalecany
-Kliknij dwukrotnie **`uruchom_stream.bat`** (lub uruchom `python netcast_gui.py`).
-Otworzy się ciemne okno aplikacji pozwalające jednym kliknięciem:
+### 1. Interfejs okienkowy (GUI) – Zalecany (bez okna konsoli w tle)
+Kliknij dwukrotnie **`LG_Streamer.pyw`** lub **`uruchom_stream.bat`**.
+Otworzy się ultra-lekkie, ciemne okno aplikacji (w 100% kompatybilne z przyciąganiem do stref **PowerToys FancyZones** i bez żadnej konsoli w tle) pozwalające jednym kliknięciem:
 - wybrać telewizor DLNA z listy wykrytych odbiorników w sieci LAN,
-- przełączać monitor (`Monitor 1` / `Monitor 2` / `Oba monitory`) w locie,
-- zmieniać rozdzielczość (`Full HD 1080p` / `HD 720p`), płynność (`60 FPS` / `30 FPS`), bitrate i koder GPU (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
-- włączać (`▶ WŁĄCZ STREAM`) oraz zatrzymywać (`⏹ ZATRZYMAJ NA TV`) strumień.
+- przełączać monitor (`Ekran 1` / `Ekran 2` / `Oba` lub klawiszami `F1` / `F2` / `F3`) w locie,
+- zmieniać rozdzielczość (`1080p Full HD` / `720p Szybki`), płynność (`60 FPS` / `30 FPS`), bitrate i koder GPU (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
+- włączać (`▶ WŁĄCZ / PRZEŁĄCZ NA TV`) oraz zatrzymywać (`⏹ STOP`) strumień.
 
 ### 2. Tryb konsolowy (CLI)
 Kliknij dwukrotnie **`uruchom_konsole.bat`** lub uruchom z terminala:
