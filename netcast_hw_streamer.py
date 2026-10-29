@@ -201,14 +201,131 @@ def feed_stdin_audio(ffmpeg_stdin):
 
 
 # ==============================================================================
-# Koder FFmpeg: RTX 3070 Ti (dedykowany układ NVENC, omijający rdzenie 3D zajęte przez Unity)
+# Automatyczne wykrywanie najlepszego kodera H.264 (NVIDIA / AMD / Intel / CPU)
 # ==============================================================================
-def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M"):
+DETECTED_ENCODER = None  # ("nazwa", funkcja_argumentow(bitrate))
+
+
+def detect_best_h264_encoder(ffmpeg_exe, requested="auto"):
+    """
+    Sprawdza dostępne w systemie kodery sprzętowe GPU (NVIDIA NVENC -> AMD AMF -> Intel QSV)
+    i w razie braku dedykowanego GPU przełącza na wielowątkowy koder CPU (libx264 ultrafast).
+    """
+    global DETECTED_ENCODER
+    if DETECTED_ENCODER is not None and requested == "auto":
+        return DETECTED_ENCODER
+
+    candidates = [
+        (
+            "h264_nvenc",
+            "NVIDIA NVENC (GPU)",
+            lambda br: [
+                "-c:v", "h264_nvenc",
+                "-preset", "p1",
+                "-tune", "ull",
+                "-zerolatency", "1",
+                "-delay", "0",
+                "-aud", "1",
+                "-forced-idr", "1",
+                "-profile:v", "high",
+                "-rc", "cbr",
+                "-b:v", br,
+                "-maxrate", br,
+                "-bufsize", "2M",
+                "-g", "30",
+                "-bf", "0",
+            ],
+        ),
+        (
+            "h264_amf",
+            "AMD AMF (GPU)",
+            lambda br: [
+                "-c:v", "h264_amf",
+                "-usage", "ultralowlatency",
+                "-quality", "speed",
+                "-profile:v", "high",
+                "-rc", "cbr",
+                "-b:v", br,
+                "-maxrate", br,
+                "-bufsize", "2M",
+                "-g", "30",
+                "-bf", "0",
+                "-aud", "1",
+            ],
+        ),
+        (
+            "h264_qsv",
+            "Intel QuickSync (iGPU/dGPU)",
+            lambda br: [
+                "-c:v", "h264_qsv",
+                "-preset", "veryfast",
+                "-async_depth", "1",
+                "-profile:v", "high",
+                "-b:v", br,
+                "-maxrate", br,
+                "-bufsize", "2M",
+                "-g", "30",
+                "-bf", "0",
+                "-aud", "1",
+            ],
+        ),
+        (
+            "libx264",
+            "CPU Software (libx264 ultrafast zerolatency)",
+            lambda br: [
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-tune", "zerolatency",
+                "-profile:v", "high",
+                "-b:v", br,
+                "-maxrate", br,
+                "-bufsize", "2M",
+                "-g", "30",
+                "-bf", "0",
+                "-aud", "1",
+            ],
+        ),
+    ]
+
+    if requested != "auto":
+        candidates = [c for c in candidates if c[0] == requested] + candidates
+
+    for enc_id, label, builder in candidates:
+        test_cmd = [
+            ffmpeg_exe,
+            "-hide_banner",
+            "-loglevel", "error",
+            "-f", "lavfi",
+            "-i", "color=c=black:s=640x360:r=30",
+            "-frames:v", "1",
+            "-vf", "format=nv12",
+            *builder("4M"),
+            "-f", "null",
+            "NUL" if os.name == "nt" else "/dev/null",
+        ]
+        try:
+            r = subprocess.run(test_cmd, capture_output=True, timeout=3)
+            if r.returncode == 0:
+                DETECTED_ENCODER = (enc_id, label, builder)
+                return DETECTED_ENCODER
+        except Exception:
+            continue
+
+    DETECTED_ENCODER = candidates[-1]
+    return DETECTED_ENCODER
+
+
+# ==============================================================================
+# Koder FFmpeg: Uniwersalny potok GPU/CPU + WASAPI Audio
+# ==============================================================================
+def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M", encoder_pref="auto"):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     BROADCASTER.active_monitor = default_monitor
     BROADCASTER.active_height = height
+    enc_id, enc_label, enc_builder = detect_best_h264_encoder(ffmpeg_exe, encoder_pref)
+    print(f"  [Koder Wideo] Wybrano automatycznie: {enc_label} ({enc_id})")
 
-    # Podnieś priorytet procesu Pythona, aby edytory Unity nie przywłaszczały czasu CPU
+    # Podnieś priorytet procesu Pythona, aby edytory Unity/gry nie przywłaszczały czasu CPU
     try:
         import ctypes
         ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00000080)
@@ -218,7 +335,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M"):
     while RUNNING:
         mon_idx = BROADCASTER.active_monitor
         cur_height = BROADCASTER.active_height
-        offset_x, offset_y, grab_w, grab_h = 0, 0, 2560, 1440
+        offset_x, offset_y, grab_w, grab_h = 0, 0, 1920, 1080
         try:
             import mss
             with mss.MSS() as sct:
@@ -238,9 +355,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M"):
         actual_fps = fps
         cur_bitrate = "6M" if out_h >= 1080 else "4500k"
 
-        # Przechwytywanie przez DirectX 11 ddagrab, ale skalowanie SIMD (fast_bilinear -> nv12)
-        # poza rdzeniami CUDA 3D (które są obciążone przez 10 instancji Unity.exe!).
-        # Sam enkoder h264_nvenc działa na osobnym, dedykowanym silniku sprzętowym NVENC ASIC.
+        # Przechwytywanie przez DirectX 11 ddagrab (z automatycznym fallbackiem do gdigrab)
         if BROADCASTER.use_ddagrab and mon_idx in (1, 2):
             dda_idx = mon_idx - 1
             video_input_args = [
@@ -285,21 +400,8 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M"):
             "-map", "1:a:0",
             "-vf", vf_chain,
             "-threads", "4",
-            # Sprzętowy koder NVIDIA RTX 3070 Ti (dedykowany blok NVENC ASIC)
-            "-c:v", "h264_nvenc",
-            "-preset", "p1",
-            "-tune", "ull",
-            "-zerolatency", "1",
-            "-delay", "0",
-            "-aud", "1",
-            "-forced-idr", "1",
-            "-profile:v", "high",
-            "-rc", "cbr",
-            "-b:v", cur_bitrate,
-            "-maxrate", cur_bitrate,
-            "-bufsize", "2M",
-            "-g", "30",  # Klatka kluczowa IDR co 0.5s (brak pompowania bitrate i brak makrobloków)
-            "-bf", "0",
+            # Uniwersalne argumenty wykrytego kodera (NVENC / AMF / QSV / libx264)
+            *enc_builder(cur_bitrate),
             "-flags", "+global_header",
             "-bsf:v", "h264_metadata=level=4.1,dump_extra=freq=keyframe",
             # Koder audio MP2 stereo
@@ -318,7 +420,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="7M"):
         ]
 
         print(
-            f"  [NVENC High-Priority] {cap_mode} | Monitor {mon_idx} ({grab_w}x{grab_h}) -> "
+            f"  [{enc_id}] {cap_mode} | Monitor {mon_idx} ({grab_w}x{grab_h}) -> "
             f"{out_w}x{out_h} @ {actual_fps} FPS ({cur_bitrate}) + Audio WASAPI"
         )
         t_launch = time.perf_counter()
@@ -598,9 +700,13 @@ def ssdp_Responder_and_announcer(local_ip, port, tv_ip="192.168.0.114"):
 
 
 # ==============================================================================
-# Kontroler UPnP AVTransport1 (Push do TV)
+# Uniwersalny kontroler UPnP AVTransport1 (wykrywanie dowolnego TV DLNA w LAN)
 # ==============================================================================
-def find_lg_55lm670s_avtransport():
+def discover_all_dlna_renderers(hint_ip=None):
+    """
+    Wyszukuje wszystkie telewizory i odbiorniki DLNA (AVTransport:1) w sieci lokalnej.
+    Zwraca listę krotek: [(friendly_name, control_url, tv_ip), ...], z priorytetem dla LG 55LM670S.
+    """
     q = '"'
     msg = (
         "M-SEARCH * HTTP/1.1\r\n"
@@ -610,48 +716,80 @@ def find_lg_55lm670s_avtransport():
         "ST: urn:schemas-upnp-org:service:AVTransport:1\r\n\r\n"
     ).encode("ascii")
 
-    locations = []
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(1.2)
+    # Zbierz lokalne adresy IPv4 ze wszystkich aktywnych kart sieciowych (Wi-Fi / Ethernet)
+    local_ips = []
     try:
-        sock.sendto(msg, ("192.168.0.114", 1900))
-        sock.sendto(msg, ("239.255.255.250", 1900))
-        t_end = time.time() + 1.2
-        while time.time() < t_end:
-            try:
-                data, addr = sock.recvfrom(4096)
-                txt = data.decode("utf-8", errors="ignore")
-                for line in txt.splitlines():
-                    if line.upper().startswith("LOCATION:"):
-                        loc = line.split(":", 1)[1].strip()
-                        if addr[0] == "192.168.0.114" or "LGE_DLNA" in txt.upper():
-                            locations.insert(0, loc)
-                        else:
-                            locations.append(loc)
-            except socket.timeout:
-                break
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and not ip.startswith("169.254.") and ip not in local_ips:
+                local_ips.append(ip)
     except Exception:
         pass
-    finally:
-        sock.close()
+    if not local_ips:
+        local_ips = ["0.0.0.0"]
 
+    locations = []
+    for bind_ip in local_ips:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1.0)
+        try:
+            if bind_ip != "0.0.0.0":
+                sock.bind((bind_ip, 0))
+            if hint_ip:
+                sock.sendto(msg, (hint_ip, 1900))
+            sock.sendto(msg, ("239.255.255.250", 1900))
+            t_end = time.time() + 1.0
+            while time.time() < t_end:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                    txt = data.decode("utf-8", errors="ignore")
+                    for line in txt.splitlines():
+                        if line.upper().startswith("LOCATION:"):
+                            loc = line.split(":", 1)[1].strip()
+                            if loc not in locations:
+                                if (hint_ip and addr[0] == hint_ip) or "LGE_DLNA" in txt.upper():
+                                    locations.insert(0, loc)
+                                else:
+                                    locations.append(loc)
+                except socket.timeout:
+                    break
+        except Exception:
+            pass
+        finally:
+            sock.close()
+
+    renderers = []
     for loc in locations:
         try:
             xml = urllib.request.urlopen(loc, timeout=1.5).read().decode("utf-8", errors="ignore")
-            if "55LM670S" in xml or "LG" in xml:
-                parsed = urlparse(loc)
-                base = f"{parsed.scheme}://{parsed.netloc}"
-                m = re.search(
-                    r"<serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>.*?<controlURL>(.*?)</controlURL>",
-                    xml,
-                    re.S,
-                )
-                ctrl_path = m.group(1).strip() if m else "/upnp/control/AVTransport1"
-                if not ctrl_path.startswith("/"):
-                    ctrl_path = "/" + ctrl_path
-                return base + ctrl_path, parsed.hostname
+            if "AVTransport:1" not in xml:
+                continue
+            parsed = urlparse(loc)
+            base = f"{parsed.scheme}://{parsed.netloc}"
+            m_name = re.search(r"<friendlyName>(.*?)</friendlyName>", xml, re.S)
+            fname = m_name.group(1).strip() if m_name else f"DLNA TV ({parsed.hostname})"
+            m_ctrl = re.search(
+                r"<serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>.*?<controlURL>(.*?)</controlURL>",
+                xml,
+                re.S,
+            )
+            ctrl_path = m_ctrl.group(1).strip() if m_ctrl else "/upnp/control/AVTransport1"
+            if not ctrl_path.startswith("/"):
+                ctrl_path = "/" + ctrl_path
+            entry = (fname, base + ctrl_path, parsed.hostname)
+            if "55LM670S" in fname or (hint_ip and parsed.hostname == hint_ip):
+                renderers.insert(0, entry)
+            else:
+                renderers.append(entry)
         except Exception:
             pass
+    return renderers
+
+
+def find_lg_55lm670s_avtransport(hint_ip="192.168.0.114"):
+    renderers = discover_all_dlna_renderers(hint_ip=hint_ip)
+    if renderers:
+        return renderers[0][1], renderers[0][2]
     return None, None
 
 
@@ -912,42 +1050,63 @@ def get_preferred_ip(target_ip="192.168.0.114"):
 
 def main():
     global BASE_HTTP_URL, RUNNING
-    parser = argparse.ArgumentParser(description="LG 55LM670S-ZA Hardware H.264 60FPS + Audio DLNA Server")
+    parser = argparse.ArgumentParser(description="Universal Hardware H.264 60FPS + Audio DLNA Streamer")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--monitor", type=int, default=1)
     parser.add_argument("--fps", type=int, default=60)
     parser.add_argument("--height", type=int, default=1080, choices=[720, 1080])
     parser.add_argument("--bitrate", type=str, default="7M")
+    parser.add_argument(
+        "--encoder",
+        type=str,
+        default="auto",
+        choices=["auto", "h264_nvenc", "h264_amf", "h264_qsv", "libx264"],
+        help="Wybór kodera wideo (domyślnie: auto - wykrywa NVIDIA/AMD/Intel/CPU)",
+    )
+    parser.add_argument("--tv-ip", type=str, default="192.168.0.114", help="Opcjonalny adres IP telewizora")
     args = parser.parse_args()
 
-    ctrl_url, tv_ip = find_lg_55lm670s_avtransport()
-    local_ip = get_preferred_ip(tv_ip or "192.168.0.114")
+    renderers = discover_all_dlna_renderers(hint_ip=args.tv_ip)
+    selected_idx = 0
+    if renderers:
+        tv_name, ctrl_url, tv_ip = renderers[0]
+    else:
+        tv_name, ctrl_url, tv_ip = ("Brak", None, args.tv_ip)
+
+    local_ip = get_preferred_ip(tv_ip or "8.8.8.8")
     BASE_HTTP_URL = f"http://{local_ip}:{args.port}"
     stream_url = f"{BASE_HTTP_URL}/live/mon{args.monitor}_{args.height}.mpg"
 
     print("=" * 78)
-    print("  LG 55LM670S-ZA - Sprzętowy Serwer DLNA H.264 (RTX 3070 Ti 60FPS) + Dźwięk")
+    print("  Uniwersalny Streamer DLNA H.264 (NVIDIA / AMD / Intel / CPU 60FPS) + Dźwięk")
     print("=" * 78)
-    print(f"  Nazwa w menu TV (Smart Share / INPUT) :  {FRIENDLY_NAME}")
-    print(f"  Bezpośredni adres strumienia MPEG-TS  :  {stream_url}")
-    if ctrl_url:
-        print(f"  Wykryto telewizor LG 55LM670S-ZA      :  {tv_ip}")
+    print(f"  Adres serwera PC                      :  {BASE_HTTP_URL}")
+    print(f"  Strumień MPEG-TS                      :  {stream_url}")
+    if renderers:
+        print("  Wykryte telewizory DLNA w sieci LAN   :")
+        for idx, (r_name, r_ctrl, r_ip) in enumerate(renderers):
+            marker = "-->" if idx == selected_idx else "   "
+            print(f"   {marker} [{idx + 1}] {r_name} ({r_ip})")
+    else:
+        print("  Wykryte telewizory DLNA               :  Brak (upewnij się, że TV jest włączony)")
     print("-" * 78)
-    print("  STEROWANIE PROSTO Z TEGO OKNA KONSOLI (TV musi być na zwykłym kanale/HDMI, NIE w menu Smart):")
+    print("  STEROWANIE PROSTO Z TEGO OKNA KONSOLI (TV na zwykłym kanale/HDMI, po naciśnięciu EXIT):")
     print("    [ENTER]     -> Włącz / odśwież aktualny strumień na ekranie TV")
     print("    [1] + ENTER -> Monitor 1 : Full HD 1080p @ 60 FPS + Dźwięk")
     print("    [2] + ENTER -> Monitor 1 : HD 720p Ultra-Low-Lag @ 60 FPS + Dźwięk")
     print("    [3] + ENTER -> Monitor 2 : Full HD 1080p @ 60 FPS + Dźwięk")
     print("    [4] + ENTER -> Monitor 2 : HD 720p Ultra-Low-Lag @ 60 FPS + Dźwięk")
+    if len(renderers) > 1:
+        print("    [t] + ENTER -> Przełącz docelowy telewizor DLNA na następny z listy")
     print("=" * 78)
 
     # 1. Start pojedynczego wątku WASAPI Loopback
     threading.Thread(target=global_wasapi_capture_thread, daemon=True).start()
 
-    # 2. Start kodera sprzętowego FFmpeg (RTX 3070 Ti NVENC)
+    # 2. Start kodera FFmpeg (auto-detekcja GPU/CPU)
     threading.Thread(
         target=ffmpeg_producer_loop,
-        args=(args.monitor, args.fps, args.height, args.bitrate),
+        args=(args.monitor, args.fps, args.height, args.bitrate, args.encoder),
         daemon=True,
     ).start()
 
@@ -955,10 +1114,10 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", args.port), DLNAHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    # 4. Start rozgłaszania UPnP SSDP (aby TV widział nas w Smart Share i na liście INPUT)
+    # 4. Start rozgłaszania UPnP SSDP
     threading.Thread(
         target=ssdp_Responder_and_announcer,
-        args=(local_ip, args.port, tv_ip or "192.168.0.114"),
+        args=(local_ip, args.port, tv_ip),
         daemon=True,
     ).start()
 
@@ -971,7 +1130,7 @@ def main():
 
     try:
         while True:
-            cmd_in = input().strip()
+            cmd_in = input().strip().lower()
             if cmd_in == "1":
                 stream_url = f"{BASE_HTTP_URL}/live/mon1_1080.mpg"
                 BROADCASTER.set_stream_profile(1, 1080)
@@ -984,8 +1143,16 @@ def main():
             elif cmd_in == "4":
                 stream_url = f"{BASE_HTTP_URL}/live/mon2_720.mpg"
                 BROADCASTER.set_stream_profile(2, 720)
+            elif cmd_in == "t" and renderers:
+                selected_idx = (selected_idx + 1) % len(renderers)
+                tv_name, ctrl_url, tv_ip = renderers[selected_idx]
+                print(f"  [TV] Przełączono docelowy odbiornik na: {tv_name} ({tv_ip})")
 
-            ctrl_url, tv_ip = find_lg_55lm670s_avtransport()
+            if not ctrl_url:
+                renderers = discover_all_dlna_renderers(hint_ip=args.tv_ip)
+                if renderers:
+                    tv_name, ctrl_url, tv_ip = renderers[selected_idx % len(renderers)]
+
             if ctrl_url:
                 push_stream_to_tv_dlna(ctrl_url, stream_url)
             else:
