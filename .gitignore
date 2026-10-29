@@ -5,3 +5,4 @@ __pycache__/
 venv/
 .env
 *.log
+streamer_settings.json

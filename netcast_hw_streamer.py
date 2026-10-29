@@ -64,6 +64,11 @@ class StreamBroadcaster:
         self.use_ddagrab = True
         self.ffmpeg_proc = None
         self.status_callback = None
+        self.bytes_counter = 0
+        self.last_rate_ts = time.monotonic()
+        self.current_mbps = 0.0
+        self.audio_level = 0.0
+        self.audio_device_name = "Wykrywanie..."
 
     def notify_status(self, msg):
         print(msg)
@@ -118,6 +123,13 @@ class StreamBroadcaster:
         if not chunk:
             return
         with self.lock:
+            self.bytes_counter += len(chunk)
+            now = time.monotonic()
+            dt = now - self.last_rate_ts
+            if dt >= 0.5:
+                self.current_mbps = (self.bytes_counter * 8.0) / (dt * 1_000_000.0)
+                self.bytes_counter = 0
+                self.last_rate_ts = now
             dead = []
             for q in self.clients:
                 try:
@@ -150,6 +162,7 @@ def global_wasapi_capture_thread():
                 loopback = p.get_default_wasapi_loopback()
                 dev_rate = int(loopback.get("defaultSampleRate", 48000))
                 dev_ch = min(2, int(loopback.get("maxInputChannels", 2)))
+                BROADCASTER.audio_device_name = loopback.get("name", "WASAPI Loopback")
                 print(
                     f"  [Audio] Aktywne przechwytywanie dźwięku: {loopback['name']} "
                     f"({dev_rate} Hz, {dev_ch} kan.)"
@@ -158,6 +171,10 @@ def global_wasapi_capture_thread():
                 def cb(in_data, frame_count, time_info, status):
                     try:
                         AUDIO_QUEUE.put_nowait(in_data)
+                        # Szybki próbnik amplitudy audio dla paska VU w GUI (co 64 bajty)
+                        if in_data:
+                            peak = max(abs(int.from_bytes(in_data[i:i+2], "little", signed=True)) for i in range(0, min(len(in_data) - 1, 512), 32))
+                            BROADCASTER.audio_level = min(1.0, peak / 24000.0)
                     except queue.Full:
                         try:
                             AUDIO_QUEUE.get_nowait()
@@ -205,6 +222,7 @@ def feed_stdin_audio(ffmpeg_stdin):
             ffmpeg_stdin.flush()
         except queue.Empty:
             # Na komputerze nic obecnie nie gra -> podawaj ciszę ze stałym zegarem 20 ms
+            BROADCASTER.audio_level = 0.0
             t_sil = time.perf_counter()
             sil_sent = 0
             while RUNNING and AUDIO_QUEUE.empty():
