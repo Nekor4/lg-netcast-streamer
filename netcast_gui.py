@@ -150,7 +150,7 @@ class StreamerGUI:
         self.root = root
         self.root.title("LG NetCast & Universal DLNA Streamer")
         self.root.geometry("780x635")
-        self.root.minsize(740, 590)
+        self.root.minsize(420, 64)
         self.root.configure(bg=self.BG_MAIN)
         enable_dark_titlebar_and_dpi(self.root)
         self._setup_dark_ttk_styles()
@@ -159,6 +159,8 @@ class StreamerGUI:
         self.renderers = []  # [(name, ctrl_url, ip), ...]
         self.monitors_info = self._detect_monitors()
         self.logs_visible = False
+        self.mini_mode = False
+        self.always_on_top = False
 
         # Wczytaj zapisane ustawienia lub domyślne
         saved = self._load_settings()
@@ -170,6 +172,7 @@ class StreamerGUI:
         self.fps_var = tk.IntVar(value=saved.get("fps", 60))
         self.bitrate_var = tk.StringVar(value=saved.get("bitrate", "6M"))
         self.encoder_var = tk.StringVar(value=saved.get("encoder", "auto"))
+        self.always_on_top = bool(saved.get("always_on_top", False))
 
         # Walidacja numeru monitora
         valid_mons = [m[0] for m in self.monitors_info]
@@ -185,8 +188,15 @@ class StreamerGUI:
 
         self.monitor_cards = {}
         self.pill_groups = []
+        self.mini_mon_pills = None
 
         self._build_ui()
+        if self.always_on_top:
+            self.root.attributes("-topmost", True)
+            self._refresh_pin_buttons()
+        if saved.get("mini_mode", False):
+            self.toggle_mini_mode()
+
         self._bind_shortcuts()
         core.BROADCASTER.status_callback = self.append_log
 
@@ -243,6 +253,8 @@ class StreamerGUI:
             "fps": self.fps_var.get(),
             "bitrate": self.bitrate_var.get(),
             "encoder": self.encoder_var.get(),
+            "mini_mode": self.mini_mode,
+            "always_on_top": self.always_on_top,
         }
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -271,6 +283,7 @@ class StreamerGUI:
         self.root.bind("<F1>", lambda _e: self._select_monitor_card(1))
         self.root.bind("<F2>", lambda _e: self._select_monitor_card(2))
         self.root.bind("<F3>", lambda _e: self._select_monitor_card(0))
+        self.root.bind("<F4>", lambda _e: self.toggle_mini_mode())
 
     def _make_card(self, parent, title=None, subtitle=None, pady=(0, 10)):
         outer = tk.Frame(
@@ -304,9 +317,108 @@ class StreamerGUI:
 
     def _build_ui(self):
         # ======================================================================
-        # 1. NAGŁÓWEK + PASEK TELEMETRII NA ŻYWO
+        # WIDOK MINI-PASKA (COMPACT MINI WIDGET - przełączany przyciskiem / F4)
         # ======================================================================
-        top_bar = tk.Frame(self.root, bg=self.BG_MAIN, padx=20, pady=12)
+        self.mini_container = tk.Frame(self.root, bg=self.BG_MAIN, padx=10, pady=8)
+
+        mini_top = tk.Frame(
+            self.mini_container,
+            bg=self.BG_CARD,
+            highlightbackground=self.BORDER_SUBTLE,
+            highlightthickness=1,
+            padx=10,
+            pady=6,
+        )
+        mini_top.pack(fill="both", expand=True)
+
+        self.mini_badge = tk.Label(
+            mini_top,
+            text="● GOTOWY",
+            font=("Segoe UI", 8, "bold"),
+            bg="#16233a",
+            fg="#58a6ff",
+            padx=8,
+            pady=4,
+        )
+        self.mini_badge.pack(side="left", padx=(0, 8))
+
+        # Mini VU audio w trybie kompaktowym
+        self.mini_vu_canvas = tk.Canvas(mini_top, width=36, height=8, bg="#0d1117", highlightthickness=0)
+        self.mini_vu_canvas.pack(side="left", padx=(0, 10))
+        self.mini_vu_rect = self.mini_vu_canvas.create_rectangle(0, 0, 0, 8, fill="#3fb950", width=0)
+
+        # Szybkie przełączniki ekranu w trybie Mini
+        mini_mon_opts = [(m[0], "Oba" if m[0] == 0 else f"Ekran {m[0]}") for m in self.monitors_info]
+        self.mini_mon_pills = SegmentedPills(
+            mini_top,
+            mini_mon_opts,
+            self.monitor_var,
+            command=self._on_mini_monitor_selected,
+            bg=self.BG_CARD,
+        )
+        self.mini_mon_pills.pack(side="left", padx=(0, 6))
+
+        # Przyciski Start / Stop / Przypnij / Rozwiń w trybie Mini
+        btn_m_expand = tk.Label(
+            mini_top,
+            text="⤢ Pełne",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.BG_CARD_ALT,
+            fg="#58a6ff",
+            padx=9,
+            pady=4,
+            cursor="hand2",
+        )
+        btn_m_expand.pack(side="right")
+        btn_m_expand.bind("<Button-1>", lambda _e: self.toggle_mini_mode())
+
+        self.btn_mini_pin = tk.Label(
+            mini_top,
+            text="📌",
+            font=("Segoe UI", 8),
+            bg=self.BG_CARD_ALT,
+            fg=self.FG_MUTED,
+            padx=7,
+            pady=4,
+            cursor="hand2",
+        )
+        self.btn_mini_pin.pack(side="right", padx=(0, 4))
+        self.btn_mini_pin.bind("<Button-1>", lambda _e: self.toggle_always_on_top())
+
+        btn_m_stop = tk.Label(
+            mini_top,
+            text="⏹",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.ACCENT_RED,
+            fg="#ffffff",
+            padx=8,
+            pady=4,
+            cursor="hand2",
+        )
+        btn_m_stop.pack(side="right", padx=(0, 4))
+        btn_m_stop.bind("<Button-1>", lambda _e: self.stop_on_tv_async())
+
+        btn_m_play = tk.Label(
+            mini_top,
+            text="▶ TV",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.ACCENT_GREEN,
+            fg="#ffffff",
+            padx=9,
+            pady=4,
+            cursor="hand2",
+        )
+        btn_m_play.pack(side="right", padx=(0, 4))
+        btn_m_play.bind("<Button-1>", lambda _e: self.push_to_tv_async())
+
+        # ======================================================================
+        # GŁÓWNY KONTENER PEŁNEGO WIDOKU
+        # ======================================================================
+        self.full_container = tk.Frame(self.root, bg=self.BG_MAIN)
+        self.full_container.pack(fill="both", expand=True)
+
+        # 1. NAGŁÓWEK + PASEK TELEMETRII NA ŻYWO
+        top_bar = tk.Frame(self.full_container, bg=self.BG_MAIN, padx=20, pady=12)
         top_bar.pack(fill="x")
 
         title_col = tk.Frame(top_bar, bg=self.BG_MAIN)
@@ -328,7 +440,36 @@ class StreamerGUI:
             fg=self.FG_MUTED,
         ).pack(anchor="w")
 
-        # Pigułka statusu na żywo po prawej
+        # Przyciski Trybu Mini oraz Przypięcia na wierzchu po prawej
+        btn_mini = tk.Label(
+            top_bar,
+            text="🗕 Tryb Mini [F4]",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.BG_CARD_ALT,
+            fg="#a5d6ff",
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        btn_mini.pack(side="right", padx=(6, 0))
+        btn_mini.bind("<Button-1>", lambda _e: self.toggle_mini_mode())
+        btn_mini.bind("<Enter>", lambda _e: btn_mini.configure(bg="#262f3d", fg="#ffffff"))
+        btn_mini.bind("<Leave>", lambda _e: btn_mini.configure(bg=self.BG_CARD_ALT, fg="#a5d6ff"))
+
+        self.btn_full_pin = tk.Label(
+            top_bar,
+            text="📌 Na wierzchu",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.BG_CARD_ALT,
+            fg=self.FG_MUTED,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        self.btn_full_pin.pack(side="right", padx=(6, 0))
+        self.btn_full_pin.bind("<Button-1>", lambda _e: self.toggle_always_on_top())
+
+        # Pigułka statusu na żywo
         self.live_badge = tk.Label(
             top_bar,
             text="● INICJALIZACJA...",
@@ -341,7 +482,7 @@ class StreamerGUI:
         self.live_badge.pack(side="right")
 
         # Pasek 3 mini-kart telemetrii (Bitrate, Dźwięk VU, Koder GPU)
-        tele_row = tk.Frame(self.root, bg=self.BG_MAIN, padx=20)
+        tele_row = tk.Frame(self.full_container, bg=self.BG_MAIN, padx=20)
         tele_row.pack(fill="x", pady=(0, 10))
         tele_row.columnconfigure(0, weight=1)
         tele_row.columnconfigure(1, weight=1)
@@ -378,7 +519,7 @@ class StreamerGUI:
         # 2. KARTA TELEWIZORA DLNA
         # ======================================================================
         card_tv = self._make_card(
-            self.root,
+            self.full_container,
             title="1. Odbiornik TV w sieci domowej (DLNA / UPnP)",
             subtitle="Wskazówka: wyjdź z menu Smart na pilocie przyciskiem EXIT",
         )
@@ -430,7 +571,7 @@ class StreamerGUI:
         # 3. KARTA WYBORU EKRANU (WIZUALNE KAFELKI MONITORÓW)
         # ======================================================================
         card_mon = self._make_card(
-            self.root,
+            self.full_container,
             title="2. Przechwytywany Ekran (Kliknij ekran lub użyj F1 / F2 / F3)",
             subtitle="Przełączanie w locie bez przerywania pracy",
         )
@@ -478,7 +619,7 @@ class StreamerGUI:
         # 4. KARTA JAKOŚCI I PRESETÓW
         # ======================================================================
         card_q = self._make_card(
-            self.root,
+            self.full_container,
             title="3. Profil Jakości i Kodowania",
             subtitle="Każda zmiana automatycznie odświeża strumień na TV",
         )
@@ -561,7 +702,7 @@ class StreamerGUI:
         # ======================================================================
         # 5. GŁÓWNE PRZYCISKI STEROWANIA + STOPKA LOGÓW
         # ======================================================================
-        action_bar = tk.Frame(self.root, bg=self.BG_MAIN, padx=20, pady=4)
+        action_bar = tk.Frame(self.full_container, bg=self.BG_MAIN, padx=20, pady=4)
         action_bar.pack(fill="x")
 
         self.btn_push = tk.Label(
@@ -609,7 +750,7 @@ class StreamerGUI:
         self.btn_toggle_logs.bind("<Leave>", lambda _e: self.btn_toggle_logs.configure(bg=self.BG_CARD_ALT, fg=self.FG_MUTED))
 
         # Pasek ostatniego komunikatu na dole (zawsze widoczny)
-        footer = tk.Frame(self.root, bg=self.BG_MAIN, padx=22, pady=4)
+        footer = tk.Frame(self.full_container, bg=self.BG_MAIN, padx=22, pady=4)
         footer.pack(fill="x")
         self.lbl_last_status = tk.Label(
             footer,
@@ -623,7 +764,7 @@ class StreamerGUI:
 
         # Szuflada logów (domyślnie zwinięta dla czystości UI)
         self.log_drawer = tk.Frame(
-            self.root,
+            self.full_container,
             bg=self.BG_CARD,
             highlightbackground=self.BORDER_SUBTLE,
             highlightthickness=1,
@@ -641,6 +782,34 @@ class StreamerGUI:
             wrap="word",
         )
         self.log_text.pack(fill="both", expand=True)
+
+    def toggle_mini_mode(self):
+        self.mini_mode = not self.mini_mode
+        if self.mini_mode:
+            self.full_container.pack_forget()
+            self.mini_container.pack(fill="both", expand=True)
+            self.root.geometry("540x62")
+        else:
+            self.mini_container.pack_forget()
+            self.full_container.pack(fill="both", expand=True)
+            self.root.geometry("780x770" if self.logs_visible else "780x635")
+        self._save_settings()
+
+    def toggle_always_on_top(self):
+        self.always_on_top = not self.always_on_top
+        self.root.attributes("-topmost", self.always_on_top)
+        self._refresh_pin_buttons()
+        self._save_settings()
+
+    def _refresh_pin_buttons(self):
+        bg = "#1f6feb" if self.always_on_top else self.BG_CARD_ALT
+        fg = "#ffffff" if self.always_on_top else self.FG_MUTED
+        self.btn_full_pin.configure(bg=bg, fg=fg)
+        self.btn_mini_pin.configure(bg=bg, fg=fg)
+
+    def _on_mini_monitor_selected(self):
+        self._refresh_monitor_cards()
+        self.on_profile_change()
 
     def toggle_logs(self):
         self.logs_visible = not self.logs_visible
@@ -660,6 +829,8 @@ class StreamerGUI:
             return
         self.monitor_var.set(mon_id)
         self._refresh_monitor_cards()
+        if self.mini_mon_pills:
+            self.mini_mon_pills.refresh()
         self.on_profile_change()
 
     def _refresh_monitor_cards(self):
@@ -698,9 +869,19 @@ class StreamerGUI:
                     bg="#122d1f",
                     fg="#3fb950",
                 )
+                self.mini_badge.configure(
+                    text=f"● LIVE {mbps:.1f}M",
+                    bg="#122d1f",
+                    fg="#3fb950",
+                )
             else:
                 self.live_badge.configure(
                     text=f"● GOTOWY (Port :{self.port})",
+                    bg="#16233a",
+                    fg="#58a6ff",
+                )
+                self.mini_badge.configure(
+                    text="● GOTOWY",
                     bg="#16233a",
                     fg="#58a6ff",
                 )
@@ -713,12 +894,18 @@ class StreamerGUI:
                 dev_name = dev_name[:20] + "…"
             self.lbl_audio_dev.configure(text=dev_name)
 
-            w = max(10, self.vu_canvas.winfo_width())
             lvl = core.BROADCASTER.audio_level
-            bar_w = int(w * min(1.0, lvl))
             color = "#3fb950" if lvl < 0.75 else "#d29922"
+
+            w = max(10, self.vu_canvas.winfo_width())
+            bar_w = int(w * min(1.0, lvl))
             self.vu_canvas.coords(self.vu_rect, 0, 0, bar_w, 10)
             self.vu_canvas.itemconfig(self.vu_rect, fill=color)
+
+            mw = max(10, self.mini_vu_canvas.winfo_width())
+            mbar_w = int(mw * min(1.0, lvl))
+            self.mini_vu_canvas.coords(self.mini_vu_rect, 0, 0, mbar_w, 8)
+            self.mini_vu_canvas.itemconfig(self.mini_vu_rect, fill=color)
         except Exception:
             pass
         self.root.after(250, self._schedule_telemetry_update)
