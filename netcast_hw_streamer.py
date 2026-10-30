@@ -188,39 +188,107 @@ def global_wasapi_capture_thread():
             time.sleep(2.0)
 
 
+def resize_pcm_frames(pcm, n_out, frame=4):
+    """Stretches/squeezes PCM to n_out frames by repeating/dropping single frames spread evenly."""
+    n_in = len(pcm) // frame
+    k = abs(n_out - n_in)
+    if k == 0:
+        return bytes(pcm)
+    parts = []
+    prev = 0
+    for i in range(1, k + 1):
+        cut = i * n_in // (k + 1) * frame
+        parts.append(pcm[prev:cut])
+        if n_out > n_in:
+            parts.append(pcm[cut - frame:cut])
+            prev = cut
+        else:
+            prev = cut + frame
+    parts.append(pcm[prev:])
+    return b"".join(parts)
+
+
 def feed_stdin_audio(ffmpeg_stdin):
     """
-    Podaje próbki audio do FFmpega przy minimalnym obciążeniu CPU/GIL:
-    - Gdy gra dźwięk (WASAPI), przekazuje go bezpośrednio.
-    - Gdy panuje cisza, wysyła paczki ciszy 40 ms bez aktywnego odpytywania (zero busy-wait).
+    Feeds PCM to ffmpeg stdin paced by the system clock (QPC), not by the sound card.
+
+    ffmpeg timestamps the s16le pipe by sample count, while ddagrab stamps video with the
+    system clock. The sound card clock drifts (0.07-0.2% slow measured on a Realtek), so
+    writing WASAPI data as it arrives makes audio fall behind video during a movie; ffmpeg 7's
+    scheduler then throttles the video input to wait for audio, and the stream stutters harder
+    and harder after a few minutes. Here the byte count written always equals elapsed time:
+    - a 50 ms cushion of captured audio absorbs WASAPI callback jitter,
+    - clock drift is absorbed by repeating/dropping single frames (inaudible, up to ~0.4%),
+    - no audio (nothing playing) or a capture stall is padded with silence.
     """
-    silence_40ms = b"\x00" * (1920 * 2 * 2)  # 40 ms @ 48000 Hz stereo s16le
+    frame = 4  # s16le stereo
+    bytes_per_sec = 48000 * frame
+    block = bytes_per_sec // 100  # write in >= 10 ms blocks
+    cushion = bytes_per_sec // 20
+    max_spare = cushion * 5
+
     while not AUDIO_QUEUE.empty():
         try:
             AUDIO_QUEUE.get_nowait()
         except Exception:
             break
 
+    pending = bytearray()
+    primed = False
+    avg_spare = 0.0
+    correction = 0.0  # frames still to repeat (+) or drop (-)
+    written = 0
+    t_start = t_last = time.perf_counter()
+
     while RUNNING:
         try:
-            chunk = AUDIO_QUEUE.get(timeout=0.045)
-            ffmpeg_stdin.write(chunk)
-            ffmpeg_stdin.flush()
+            pending += AUDIO_QUEUE.get(timeout=0.01)
+            while True:
+                pending += AUDIO_QUEUE.get_nowait()
         except queue.Empty:
-            t_sil = time.perf_counter()
-            sil_sent = 0
-            while RUNNING and AUDIO_QUEUE.empty():
-                target = int((time.perf_counter() - t_sil) * 25.0) + 1
-                while sil_sent < target and AUDIO_QUEUE.empty():
-                    try:
-                        ffmpeg_stdin.write(silence_40ms)
-                        ffmpeg_stdin.flush()
-                        sil_sent += 1
-                    except (BrokenPipeError, OSError, ValueError):
-                        return
-                time.sleep(0.025)
+            pass
+
+        now = time.perf_counter()
+        due = int((now - t_start) * bytes_per_sec) // frame * frame - written
+        if due < block:
+            continue
+        dt, t_last = now - t_last, now
+
+        spare = len(pending) - due
+        if spare > max_spare:
+            # Long ffmpeg stall: drop stale audio to keep latency low
+            del pending[: spare - cushion]
+            spare = cushion
+        if not primed and spare >= cushion:
+            primed, avg_spare, correction = True, float(spare), 0.0
+
+        if not primed:
+            out = b"\x00" * due
+        elif spare < 0:
+            # Underrun: playback stopped or capture stalled -> silence until the cushion refills
+            out = bytes(pending) + b"\x00" * -spare
+            pending.clear()
+            primed = False
+        else:
+            # Clock drift: steer the (2 s averaged) spare audio back to the cushion over ~5 s
+            avg_spare += (spare - avg_spare) * min(1.0, dt / 2.0)
+            correction += (cushion - avg_spare) / frame * dt / 5.0
+            n_out = due // frame
+            k_max = max(1, n_out // 200)
+            k = max(-k_max, min(k_max, int(correction)))
+            if k < 0:
+                k = max(k, -(spare // frame))
+            correction = max(-10.0, min(10.0, correction - k))
+            take = (n_out - k) * frame
+            out = resize_pcm_frames(pending[:take], n_out, frame)
+            del pending[:take]
+
+        try:
+            ffmpeg_stdin.write(out)
+            ffmpeg_stdin.flush()
         except (BrokenPipeError, OSError, ValueError):
             return
+        written += due
 
 
 # ==============================================================================
