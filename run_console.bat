@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 python -c "import mss, PIL, imageio_ffmpeg, pyaudiowpatch" 2>nul
 if %errorlevel% neq 0 (
-    echo [Instalacja wymaganych bibliotek Python dla tego komputera...]
+    echo [Installing the required Python libraries on this computer...]
     pip install -r requirements.txt
 )
 

@@ -99,7 +99,7 @@ class StreamerGUI:
         self.fps_var = tk.IntVar(value=saved.get("fps", 60))
         self.bitrate_var = tk.StringVar(value=saved.get("bitrate", "6M"))
         self.encoder_var = tk.StringVar(value=saved.get("encoder", "auto"))
-        self.status_var = tk.StringVar(value="Inicjalizacja serwera...")
+        self.status_var = tk.StringVar(value="Initializing server...")
 
         valid_mons = [m[0] for m in self.monitors_info]
         if self.monitor_var.get() not in valid_mons and valid_mons:
@@ -155,11 +155,11 @@ class StreamerGUI:
         try:
             with mss.MSS() as sct:
                 for i in range(1, len(sct.monitors)):
-                    result.append((i, f"Ekran {i}"))
+                    result.append((i, f"Screen {i}"))
                 if len(sct.monitors) > 2:
-                    result.append((0, "Oba"))
+                    result.append((0, "Both"))
         except Exception:
-            result = [(1, "Ekran 1"), (2, "Ekran 2")]
+            result = [(1, "Screen 1"), (2, "Screen 2")]
         return result
 
     def _build_lightweight_ui(self):
@@ -188,7 +188,7 @@ class StreamerGUI:
 
         tk.Button(
             tv_frame,
-            text="Szukaj",
+            text="Search",
             font=("Segoe UI", 8, "bold"),
             bg=self.BG_PANEL,
             fg=self.FG,
@@ -198,7 +198,7 @@ class StreamerGUI:
         ).grid(row=0, column=1)
 
         # Row 1: screen selection (fast native buttons stretched in the grid)
-        tk.Label(main, text="Ekran:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
+        tk.Label(main, text="Screen:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=1, column=0, sticky="w", pady=4
         )
         mon_frame = tk.Frame(main, bg=self.BG)
@@ -218,7 +218,7 @@ class StreamerGUI:
             self.mon_buttons[m_id] = btn
 
         # Row 2: quality / resolution
-        tk.Label(main, text="Jakość:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
+        tk.Label(main, text="Quality:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=2, column=0, sticky="w", pady=4
         )
         res_frame = tk.Frame(main, bg=self.BG)
@@ -226,7 +226,7 @@ class StreamerGUI:
         res_frame.columnconfigure(0, weight=1)
         res_frame.columnconfigure(1, weight=1)
 
-        for idx, (h_val, h_label) in enumerate([(1080, "1080p (Full HD)"), (720, "720p (Szybki)")]):
+        for idx, (h_val, h_label) in enumerate([(1080, "1080p (Full HD)"), (720, "720p (Fast)")]):
             btn = tk.Button(
                 res_frame,
                 text=h_label,
@@ -239,7 +239,7 @@ class StreamerGUI:
             self.res_buttons[h_val] = btn
 
         # Row 3: FPS + bitrate + encoder (compact dropdowns)
-        tk.Label(main, text="Opcje:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
+        tk.Label(main, text="Options:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=3, column=0, sticky="w", pady=4
         )
         opt_frame = tk.Frame(main, bg=self.BG)
@@ -277,7 +277,7 @@ class StreamerGUI:
 
         tk.Button(
             act_frame,
-            text="▶ WŁĄCZ / PRZEŁĄCZ NA TV",
+            text="▶ START / SWITCH TO TV",
             font=("Segoe UI", 10, "bold"),
             bg=self.GREEN,
             fg="#ffffff",
@@ -346,12 +346,12 @@ class StreamerGUI:
             pass
 
     def _init_backend(self):
-        self.set_status("Sprawdzanie portu 8000 i kodera GPU...")
+        self.set_status("Checking port 8000 and the GPU encoder...")
         free_port_if_in_use(self.port)
 
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         _enc_id, enc_label, _ = core.detect_best_h264_encoder(ffmpeg_exe, self.encoder_var.get())
-        self.set_status(f"Koder: {enc_label}")
+        self.set_status(f"Encoder: {enc_label}")
 
         self._scan_tvs_worker(initial_auto_push=True)
 
@@ -371,15 +371,15 @@ class StreamerGUI:
         try:
             self.http_server = core.ThreadingHTTPServer(("0.0.0.0", self.port), core.DLNAHandler)
             threading.Thread(target=self.http_server.serve_forever, daemon=True).start()
-            self.set_status(f"Gotowy ({enc_label.split('(')[0].strip()}) • {core.BASE_HTTP_URL}")
+            self.set_status(f"Ready ({enc_label.split('(')[0].strip()}) • {core.BASE_HTTP_URL}")
         except Exception as exc:
-            self.set_status(f"Błąd portu {self.port}: {exc}")
+            self.set_status(f"Port {self.port} error: {exc}")
 
     def _scan_tvs_worker(self, initial_auto_push=False):
         raw = self.tv_ip_var.get().strip()
         # Extract just the IP address if the field holds a name from the list
         hint = raw.split()[-1].strip("()") if " " in raw else (raw or "192.168.0.114")
-        self.set_status(f"Szukanie TV w sieci ({self.tv_name or hint})...")
+        self.set_status(f"Searching for the TV on the network ({self.tv_name or hint})...")
         found = core.discover_all_dlna_renderers(hint_ip=hint, preferred_name=self.tv_name)
         self._set_renderers(found)
         target = self._find_remembered_tv(found)
@@ -390,17 +390,17 @@ class StreamerGUI:
             local_ip = core.get_preferred_ip(ip)
             core.BASE_HTTP_URL = f"http://{local_ip}:{self.port}"
             self.root.after(0, lambda: self.tv_ip_var.set(ip))
-            self.set_status(f"Połączono: {name} ({ip})")
+            self.set_status(f"Connected: {name} ({ip})")
             if initial_auto_push:
                 time.sleep(1.5)
                 self._push_worker()
         elif found:
             # Never fall back to another TV on its own; the user picks one from the list instead
-            self.set_status(f"Nie znaleziono TV: {self.tv_name} • wybierz odbiornik z listy")
+            self.set_status(f"TV not found: {self.tv_name} • pick a renderer from the list")
         else:
             local_ip = core.get_preferred_ip(hint)
             core.BASE_HTTP_URL = f"http://{local_ip}:{self.port}"
-            self.set_status(f"Brak odpowiedzi UPnP z {hint} (sprawdź czy TV jest włączony)")
+            self.set_status(f"No UPnP response from {hint} (check that the TV is on)")
 
     def scan_tvs_async(self):
         threading.Thread(target=self._scan_tvs_worker, args=(False,), daemon=True).start()
@@ -454,7 +454,7 @@ class StreamerGUI:
     def _push_worker(self):
         ctrl_url, tv_ip = self._get_active_control_url()
         if not ctrl_url:
-            self.set_status(f"Brak odpowiedzi z TV ({tv_ip})")
+            self.set_status(f"No response from the TV ({tv_ip})")
             return
         self._save_settings()
         if self._push_stream(ctrl_url, tv_ip):
@@ -471,7 +471,7 @@ class StreamerGUI:
         mon = self.monitor_var.get()
         h = self.height_var.get()
         stream_url = f"{core.BASE_HTTP_URL}/live/mon{mon}_{h}.mpg?t={int(time.time())}"
-        self.set_status(f"Przełączanie na TV ({tv_ip}) -> Ekran {mon}, {h}p @ {self.fps_var.get()} FPS...")
+        self.set_status(f"Switching TV ({tv_ip}) -> Screen {mon}, {h}p @ {self.fps_var.get()} FPS...")
         return core.push_stream_to_tv_dlna(ctrl_url, stream_url)
 
     def push_to_tv_async(self):

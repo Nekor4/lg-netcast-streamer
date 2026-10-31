@@ -136,9 +136,9 @@ def make_fallback_image(width, height, message):
     img = Image.new("RGB", (width, height), color=(18, 22, 34))
     draw = ImageDraw.Draw(img)
     draw.rectangle([30, 30, width - 30, height - 30], outline=(88, 166, 255), width=3)
-    draw.text((60, 70), "LG 55LM670S-ZA - Strumien PC aktywny", fill=(88, 166, 255))
+    draw.text((60, 70), "LG 55LM670S-ZA - PC stream active", fill=(88, 166, 255))
     draw.text((60, 110), message, fill=(240, 246, 252))
-    draw.text((60, 150), f"Czas serwera: {time.strftime('%H:%M:%S')}", fill=(165, 214, 255))
+    draw.text((60, 150), f"Server time: {time.strftime('%H:%M:%S')}", fill=(165, 214, 255))
     return img
 
 
@@ -177,7 +177,7 @@ def capture_loop():
                     img = make_fallback_image(
                         1280,
                         720,
-                        f"Brak dostepu GDI BitBlt w tej sesji ({grab_err}). Uruchom uruchom_stream.bat ze swojego pulpitu.",
+                        f"No GDI BitBlt access in this session ({grab_err}). Run run_stream.bat from your desktop.",
                     )
 
                 buf = io.BytesIO()
@@ -203,7 +203,7 @@ def capture_loop():
                     t0 = now
 
             except Exception as exc:
-                print(f"[!] Błąd pętli przechwytywania: {exc}")
+                print(f"[!] Capture loop error: {exc}")
                 time.sleep(0.2)
 
             elapsed = time.perf_counter() - loop_start
@@ -311,19 +311,19 @@ NETCAST_HTML = """<!DOCTYPE html>
 
 <div id="hud">
   <div class="hud-row">
-    <div class="hud-title">LG 55LM670S-ZA &mdash; Strumień Pulpitu PC</div>
-    <div class="hud-stats" id="statsText">Łączenie...</div>
+    <div class="hud-title">LG 55LM670S-ZA &mdash; PC Desktop Stream</div>
+    <div class="hud-stats" id="statsText">Connecting...</div>
     <div class="clearfix"></div>
   </div>
   <div class="btn-bar">
-    <span class="btn" onclick="setRes(540)">[1] 540p (Ultra Szybki)</span>
+    <span class="btn" onclick="setRes(540)">[1] 540p (Ultra Fast)</span>
     <span class="btn" onclick="setRes(720)">[2] 720p (HD)</span>
     <span class="btn" onclick="setRes(1080)">[3] 1080p (Full HD)</span>
-    <span class="btn" onclick="cycleQuality()"><span class="dot-red">&#9679;</span> [4/Czerw] Jakość JPEG</span>
-    <span class="btn" onclick="switchMonitor()"><span class="dot-green">&#9679;</span> [5/Ziel] Monitor</span>
-    <span class="btn" id="btnMouse" onclick="toggleRemoteMouse()"><span class="dot-yellow">&#9679;</span> [6/Żółty] Mysz z TV: WYŁ</span>
-    <span class="btn" id="btnMode" onclick="toggleStreamMode()"><span class="dot-blue">&#9679;</span> [7/Nieb] Tryb: Zero-Lag</span>
-    <span class="btn" onclick="hideHud()">[0/OK] Ukryj panel</span>
+    <span class="btn" onclick="cycleQuality()"><span class="dot-red">&#9679;</span> [4/Red] JPEG Quality</span>
+    <span class="btn" onclick="switchMonitor()"><span class="dot-green">&#9679;</span> [5/Green] Monitor</span>
+    <span class="btn" id="btnMouse" onclick="toggleRemoteMouse()"><span class="dot-yellow">&#9679;</span> [6/Yellow] TV Mouse: OFF</span>
+    <span class="btn" id="btnMode" onclick="toggleStreamMode()"><span class="dot-blue">&#9679;</span> [7/Blue] Mode: Zero-Lag</span>
+    <span class="btn" onclick="hideHud()">[0/OK] Hide panel</span>
   </div>
 </div>
 
@@ -396,7 +396,7 @@ NETCAST_HTML = """<!DOCTYPE html>
       clientFps = Math.round((clientFrames * 1000) / (now - lastFpsTime));
       clientFrames = 0;
       lastFpsTime = now;
-      statsText.innerHTML = 'TV FPS: ' + clientFps + ' kl./s | Rozdz.: ' + currentRes + 'p | Jakość: ' + currentQuality + '%';
+      statsText.innerHTML = 'TV FPS: ' + clientFps + ' fps | Res: ' + currentRes + 'p | Quality: ' + currentQuality + '%';
     }
 
     // Immediately fetch the next freshest frame from the server
@@ -426,8 +426,8 @@ NETCAST_HTML = """<!DOCTYPE html>
           currentRes = data.scale_height;
           currentQuality = data.jpeg_quality;
           remoteMouseEnabled = data.remote_control;
-          btnMouse.innerHTML = '<span class="dot-yellow">&#9679;</span> [6/Żółty] Mysz z TV: ' + (remoteMouseEnabled ? 'WŁ' : 'WYŁ');
-          statsText.innerHTML = 'TV FPS: ' + clientFps + ' | PC FPS: ' + data.fps + ' | ' + currentRes + 'p | Jakość: ' + currentQuality + '% | Mon: ' + data.monitor_index;
+          btnMouse.innerHTML = '<span class="dot-yellow">&#9679;</span> [6/Yellow] TV Mouse: ' + (remoteMouseEnabled ? 'ON' : 'OFF');
+          statsText.innerHTML = 'TV FPS: ' + clientFps + ' | PC FPS: ' + data.fps + ' | ' + currentRes + 'p | Quality: ' + currentQuality + '% | Mon: ' + data.monitor_index;
         } catch (e) {}
       }
     };
@@ -459,13 +459,13 @@ NETCAST_HTML = """<!DOCTYPE html>
   function toggleStreamMode() {
     if (streamMode === 'pull') {
       streamMode = 'mjpeg';
-      btnMode.innerHTML = '<span class="dot-blue">&#9679;</span> [7/Nieb] Tryb: MJPEG';
+      btnMode.innerHTML = '<span class="dot-blue">&#9679;</span> [7/Blue] Mode: MJPEG';
       buf1.style.display = 'none';
       buf0.style.zIndex = 2;
       buf0.src = '/stream.mjpg?t=' + (new Date()).getTime();
     } else {
       streamMode = 'pull';
-      btnMode.innerHTML = '<span class="dot-blue">&#9679;</span> [7/Nieb] Tryb: Zero-Lag';
+      btnMode.innerHTML = '<span class="dot-blue">&#9679;</span> [7/Blue] Mode: Zero-Lag';
       buf1.style.display = 'block';
       loading = false;
       requestNextFrame();
@@ -547,7 +547,7 @@ class NetCastRequestHandler(BaseHTTPRequestHandler):
         if path == "/frame.jpg":
             jpeg = STATE.latest_jpeg
             if not jpeg:
-                self.send_error(503, "Brak klatki")
+                self.send_error(503, "No frame")
                 return
             try:
                 self.send_response(200)
@@ -669,8 +669,8 @@ def build_netcast_usb_package(output_dir, server_url):
 </style>
 </head>
 <body>
-  <h1>Łączenie z komputerem PC ({server_url})...</h1>
-  <p><a href="{server_url}">Kliknij tutaj, jeśli ekran nie przełączy się automatycznie</a></p>
+  <h1>Connecting to the PC ({server_url})...</h1>
+  <p><a href="{server_url}">Click here if the screen does not switch automatically</a></p>
   <script type="text/javascript">
     window.location.replace("{server_url}");
   </script>
@@ -766,10 +766,10 @@ def discover_lg_netcast_tv(timeout=1.5):
 
 def main():
     parser = argparse.ArgumentParser(description="LG 55LM670S-ZA NetCast Screen Streamer")
-    parser.add_argument("--port", type=int, default=8000, help="Port serwera HTTP (domyślnie: 8000)")
-    parser.add_argument("--fps", type=int, default=30, help="Docelowy FPS przechwytywania (domyślnie: 30)")
-    parser.add_argument("--height", type=int, default=720, choices=[540, 720, 1080], help="Rozdzielczość pionowa")
-    parser.add_argument("--quality", type=int, default=70, help="Jakość JPEG 20-95 (domyślnie: 70)")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP server port (default: 8000)")
+    parser.add_argument("--fps", type=int, default=30, help="Target capture FPS (default: 30)")
+    parser.add_argument("--height", type=int, default=720, choices=[540, 720, 1080], help="Vertical resolution")
+    parser.add_argument("--quality", type=int, default=70, help="JPEG quality 20-95 (default: 70)")
     args = parser.parse_args()
 
     STATE.target_fps = args.fps
@@ -785,31 +785,31 @@ def main():
     app_dir = build_netcast_usb_package(usb_out, server_url)
 
     print("=" * 72)
-    print("  LG NetCast 3.0 (55LM670S-ZA) - Serwer Strumieniowania Obrazu PC")
+    print("  LG NetCast 3.0 (55LM670S-ZA) - PC Screen Streaming Server")
     print("=" * 72)
-    print(f"  Główny adres dla TV :  {server_url}")
+    print(f"  Main TV address     :  {server_url}")
     for ip in ips:
         if ip != primary_ip:
-            print(f"  Alternatywny adres  :  http://{ip}:{args.port}")
-    print(f"  Paczka USB NetCast  :  {app_dir}")
+            print(f"  Alternative address :  http://{ip}:{args.port}")
+    print(f"  NetCast USB package :  {app_dir}")
     print("-" * 72)
 
-    print("  [Szukam urządzeń UPnP / LG TV w sieci domowej...]")
+    print("  [Searching for UPnP devices / LG TVs on the home network...]")
     tvs = discover_lg_netcast_tv(timeout=1.2)
     if tvs:
         for ip, info in tvs.items():
-            print(f"   -> Wykryto w LAN: {ip} ({info[:65]}...)")
+            print(f"   -> Found on LAN: {ip} ({info[:65]}...)")
     else:
-        print("   -> Brak odpowiedzi SSDP (TV jest wyłączony lub w innej podsieci).")
+        print("   -> No SSDP response (the TV is off or on another subnet).")
     print("=" * 72)
-    print("  JAK URUCHOMIĆ NA TELEWIZORZE LG 55LM670S-ZA:")
-    print("  Sposób A (Najprostszy - bez pendrive'a):")
-    print("    1. Na pilocie TV naciśnij przycisk [HOME / SMART].")
-    print("    2. Otwórz wbudowaną aplikację [Internet / Web Browser].")
-    print(f"    3. Wpisz na górze adres:  {server_url}  i dodaj do Zakładek.")
-    print("  Sposób B (Z pendrive'a USB):")
-    print("    1. Skopiuj folder 'lgapps' z katalogu 'usb_netcast_pack' na pendrive FAT32.")
-    print("    2. Włóż pendrive do TV -> Moje Aplikacje (My Apps) -> ikona USB.")
+    print("  HOW TO OPEN IT ON THE LG 55LM670S-ZA TV:")
+    print("  Option A (simplest - no USB stick):")
+    print("    1. Press [HOME / SMART] on the TV remote.")
+    print("    2. Open the built-in [Internet / Web Browser] app.")
+    print(f"    3. Enter the address at the top:  {server_url}  and add it to Bookmarks.")
+    print("  Option B (from a USB stick):")
+    print("    1. Copy the 'lgapps' folder from 'usb_netcast_pack' to a FAT32 USB stick.")
+    print("    2. Plug the stick into the TV -> My Apps -> USB icon.")
     print("=" * 72)
 
     # Start the screen capture thread
@@ -821,7 +821,7 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[!] Zatrzymywanie serwera...")
+        print("\n[!] Stopping server...")
         STATE.running = False
         server.server_close()
 

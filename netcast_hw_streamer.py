@@ -13,7 +13,7 @@ Why this runs at 60 FPS with audio:
 - PC audio (Realtek speakers, WASAPI loopback) is captured in a single thread
   and muxed as 48 kHz stereo MP2 into the MPEG-TS stream.
 - The server announces itself on the home network as the DLNA server
-  "[PC] Pulpit RTX 60FPS", visible on the TV under INPUT / Smart Share.
+  "[PC] Desktop RTX 60FPS", visible on the TV under INPUT / Smart Share.
 """
 
 import argparse
@@ -38,7 +38,7 @@ import pyaudiowpatch as pyaudio
 # DLNA / UPnP constants for LG NetCast 3.0 (LGE_DLNA_SDK/1.5.0)
 # ==============================================================================
 SERVER_UUID = "uuid:8f9a1b2c-3d4e-5f6a-7b8c-9d0e1f2a3b4c"
-FRIENDLY_NAME = "[PC] Pulpit RTX 60FPS + Audio"
+FRIENDLY_NAME = "[PC] Desktop RTX 60FPS + Audio"
 
 DLNA_ORG_FEATURES = (
     "DLNA.ORG_PN=MPEG_TS_HD_NA_ISO;"
@@ -98,7 +98,7 @@ class StreamBroadcaster:
                 changed = True
             if changed:
                 self.notify_status(
-                    f"  [Profil] Przełączanie: Monitor {self.active_monitor}, "
+                    f"  [Profile] Switching: Monitor {self.active_monitor}, "
                     f"{self.active_height}p @ {self.active_fps} FPS ({self.active_bitrate})"
                 )
                 if self.ffmpeg_proc:
@@ -157,8 +157,8 @@ def global_wasapi_capture_thread():
                 dev_ch = min(2, int(loopback.get("maxInputChannels", 2)))
                 BROADCASTER.audio_device_name = loopback.get("name", "WASAPI Loopback")
                 print(
-                    f"  [Audio] Aktywne przechwytywanie dźwięku: {loopback['name']} "
-                    f"({dev_rate} Hz, {dev_ch} kan.)"
+                    f"  [Audio] Capturing audio from: {loopback['name']} "
+                    f"({dev_rate} Hz, {dev_ch} ch)"
                 )
 
                 def cb(in_data, frame_count, time_info, status):
@@ -184,7 +184,7 @@ def global_wasapi_capture_thread():
                     while RUNNING:
                         time.sleep(0.5)
         except Exception as exc:
-            print(f"  [Audio] Oczekiwanie na urządzenie audio ({exc})...")
+            print(f"  [Audio] Waiting for an audio device ({exc})...")
             time.sleep(2.0)
 
 
@@ -555,7 +555,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
             except Exception:
                 pass
             if err_msg:
-                print(f"  [!] Info ddagrab ({err_msg.splitlines()[-1]}), przełączam na gdigrab...")
+                print(f"  [!] Info ddagrab ({err_msg.splitlines()[-1]}), switching to gdigrab...")
                 BROADCASTER.use_ddagrab = False
 
         if RUNNING:
@@ -905,7 +905,7 @@ def push_stream_to_tv_dlna(control_url, stream_url):
         'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
         'xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">'
         '<item id="101" parentID="0" restricted="1">'
-        "<dc:title>Pulpit PC (60 FPS + Audio)</dc:title>"
+        "<dc:title>PC Desktop (60 FPS + Audio)</dc:title>"
         "<upnp:class>object.item.videoItem</upnp:class>"
         f'<res protocolInfo="{DLNA_PROTOCOL_INFO}" size="10737418240" duration="99:00:00.000">{stream_url}</res>'
         "</item></DIDL-Lite>"
@@ -949,16 +949,16 @@ def push_stream_to_tv_dlna(control_url, stream_url):
         )
         time.sleep(0.5)
         send_soap("Play", "<InstanceID>0</InstanceID><Speed>1</Speed>")
-        BROADCASTER.notify_status(f"  [DLNA Push] Telewizor przyjął strumień: {stream_url}")
+        BROADCASTER.notify_status(f"  [DLNA Push] TV accepted the stream: {stream_url}")
         return True
     except urllib.error.HTTPError as he:
         err_txt = he.read().decode("utf-8", errors="ignore")
         if "701" in err_txt:
             BROADCASTER.notify_status(
-                "  [DLNA Push] Telewizor ma obecnie otwartą aplikację Smart (kod 701) -> Naciśnij [EXIT] na pilocie TV!"
+                "  [DLNA Push] The TV has a Smart app open (code 701) -> Press [EXIT] on the TV remote!"
             )
         else:
-            BROADCASTER.notify_status(f"  [DLNA Push] Odpowiedź TV ({he.code})")
+            BROADCASTER.notify_status(f"  [DLNA Push] TV response ({he.code})")
     except Exception as exc:
         BROADCASTER.notify_status(f"  [DLNA Push] {exc}")
     return False
@@ -989,7 +989,7 @@ def stop_tv_dlna(control_url):
             },
         )
         urllib.request.urlopen(req, timeout=3).read()
-        BROADCASTER.notify_status("  [DLNA Stop] Zatrzymano odtwarzanie na telewizorze.")
+        BROADCASTER.notify_status("  [DLNA Stop] Playback stopped on the TV.")
         return True
     except Exception as exc:
         BROADCASTER.notify_status(f"  [DLNA Stop] {exc}")
@@ -1131,7 +1131,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
 
             client_q = BROADCASTER.add_client()
             print(
-                f"  [STRUMIEŃ] Telewizor ({self.address_string()}) odbiera: "
+                f"  [STREAM] TV ({self.address_string()}) is receiving: "
                 f"Monitor {req_mon}, {req_h}p @ 60 FPS + Audio!"
             )
             try:
@@ -1143,7 +1143,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
                 pass
             finally:
                 BROADCASTER.remove_client(client_q)
-                print(f"  [STRUMIEŃ] Telewizor ({self.address_string()}) zakończył odtwarzanie.")
+                print(f"  [STREAM] TV ({self.address_string()}) stopped playback.")
             return
 
         # Silence stale /frame.jpg requests from a previously open browser tab
@@ -1158,12 +1158,12 @@ class DLNAHandler(BaseHTTPRequestHandler):
 <style>body{{background:#0d1117;color:#fff;font-family:Arial,sans-serif;padding:40px;font-size:22px;}}
 h1{{color:#58a6ff;}} li{{margin:14px 0;}}</style></head>
 <body>
-<h1>Strumień sprzętowy RTX 3070 Ti (60 FPS + Dźwięk) jest AKTYWNY!</h1>
-<p>Aby uzyskać pełne 60 FPS oraz dźwięk stereo przez sprzętowy dekoder telewizora (zamiast wolnej przeglądarki WWW):</p>
+<h1>RTX 3070 Ti hardware stream (60 FPS + Audio) is ACTIVE!</h1>
+<p>To get full 60 FPS and stereo audio through the TV's hardware decoder (instead of the slow web browser):</p>
 <ol>
-  <li>Naciśnij przycisk <b>EXIT</b> na pilocie, aby zamknąć przeglądarkę internetową.</li>
-  <li>Naciśnij przycisk <b>INPUT (Złącza)</b> lub wejdź w <b>Smart Share</b> na pilocie TV.</li>
-  <li>Wybierz serwer <b>{FRIENDLY_NAME}</b> i kliknij <b>1. Monitor 1 (60 FPS + Dźwięk)</b>!</li>
+  <li>Press <b>EXIT</b> on the remote to close the web browser.</li>
+  <li>Press <b>INPUT</b> or open <b>Smart Share</b> on the TV remote.</li>
+  <li>Pick the <b>{FRIENDLY_NAME}</b> server and select <b>1. Monitor 1 (60 FPS + Audio)</b>!</li>
 </ol>
 </body></html>""".encode("utf-8")
         self.send_response(200)
@@ -1197,9 +1197,9 @@ def main():
         type=str,
         default="auto",
         choices=["auto", "h264_nvenc", "h264_amf", "h264_qsv", "libx264"],
-        help="Wybór kodera wideo (domyślnie: auto - wykrywa NVIDIA/AMD/Intel/CPU)",
+        help="Video encoder (default: auto - detects NVIDIA/AMD/Intel/CPU)",
     )
-    parser.add_argument("--tv-ip", type=str, default="192.168.0.114", help="Opcjonalny adres IP telewizora")
+    parser.add_argument("--tv-ip", type=str, default="192.168.0.114", help="Optional TV IP address")
     args = parser.parse_args()
 
     renderers = discover_all_dlna_renderers(hint_ip=args.tv_ip)
@@ -1207,33 +1207,33 @@ def main():
     if renderers:
         tv_name, ctrl_url, tv_ip = renderers[0]
     else:
-        tv_name, ctrl_url, tv_ip = ("Brak", None, args.tv_ip)
+        tv_name, ctrl_url, tv_ip = ("(none)", None, args.tv_ip)
 
     local_ip = get_preferred_ip(tv_ip or "8.8.8.8")
     BASE_HTTP_URL = f"http://{local_ip}:{args.port}"
     stream_url = f"{BASE_HTTP_URL}/live/mon{args.monitor}_{args.height}.mpg"
 
     print("=" * 78)
-    print("  Uniwersalny Streamer DLNA H.264 (NVIDIA / AMD / Intel / CPU 60FPS) + Dźwięk")
+    print("  Universal DLNA H.264 Streamer (NVIDIA / AMD / Intel / CPU 60FPS) + Audio")
     print("=" * 78)
-    print(f"  Adres serwera PC                      :  {BASE_HTTP_URL}")
-    print(f"  Strumień MPEG-TS                      :  {stream_url}")
+    print(f"  PC server address                     :  {BASE_HTTP_URL}")
+    print(f"  MPEG-TS stream                        :  {stream_url}")
     if renderers:
-        print("  Wykryte telewizory DLNA w sieci LAN   :")
+        print("  DLNA TVs found on the LAN             :")
         for idx, (r_name, r_ctrl, r_ip) in enumerate(renderers):
             marker = "-->" if idx == selected_idx else "   "
             print(f"   {marker} [{idx + 1}] {r_name} ({r_ip})")
     else:
-        print("  Wykryte telewizory DLNA               :  Brak (upewnij się, że TV jest włączony)")
+        print("  DLNA TVs found                        :  None (make sure the TV is on)")
     print("-" * 78)
-    print("  STEROWANIE PROSTO Z TEGO OKNA KONSOLI (TV na zwykłym kanale/HDMI, po naciśnięciu EXIT):")
-    print("    [ENTER]     -> Włącz / odśwież aktualny strumień na ekranie TV")
-    print("    [1] + ENTER -> Monitor 1 : Full HD 1080p @ 60 FPS + Dźwięk")
-    print("    [2] + ENTER -> Monitor 1 : HD 720p Ultra-Low-Lag @ 60 FPS + Dźwięk")
-    print("    [3] + ENTER -> Monitor 2 : Full HD 1080p @ 60 FPS + Dźwięk")
-    print("    [4] + ENTER -> Monitor 2 : HD 720p Ultra-Low-Lag @ 60 FPS + Dźwięk")
+    print("  CONTROLS IN THIS CONSOLE WINDOW (TV on a regular channel/HDMI, after pressing EXIT):")
+    print("    [ENTER]     -> Start / refresh the current stream on the TV")
+    print("    [1] + ENTER -> Monitor 1 : Full HD 1080p @ 60 FPS + Audio")
+    print("    [2] + ENTER -> Monitor 1 : HD 720p Ultra-Low-Lag @ 60 FPS + Audio")
+    print("    [3] + ENTER -> Monitor 2 : Full HD 1080p @ 60 FPS + Audio")
+    print("    [4] + ENTER -> Monitor 2 : HD 720p Ultra-Low-Lag @ 60 FPS + Audio")
     if len(renderers) > 1:
-        print("    [t] + ENTER -> Przełącz docelowy telewizor DLNA na następny z listy")
+        print("    [t] + ENTER -> Switch the target DLNA TV to the next one on the list")
     print("=" * 78)
 
     # 1. Start the single WASAPI loopback thread
@@ -1282,7 +1282,7 @@ def main():
             elif cmd_in == "t" and renderers:
                 selected_idx = (selected_idx + 1) % len(renderers)
                 tv_name, ctrl_url, tv_ip = renderers[selected_idx]
-                print(f"  [TV] Przełączono docelowy odbiornik na: {tv_name} ({tv_ip})")
+                print(f"  [TV] Target renderer switched to: {tv_name} ({tv_ip})")
 
             if not ctrl_url:
                 renderers = discover_all_dlna_renderers(hint_ip=args.tv_ip)
@@ -1292,9 +1292,9 @@ def main():
             if ctrl_url:
                 push_stream_to_tv_dlna(ctrl_url, stream_url)
             else:
-                print("  [!] Nie znaleziono usługi AVTransport telewizora w sieci.")
+                print("  [!] No TV AVTransport service found on the network.")
     except (KeyboardInterrupt, EOFError):
-        print("\n[!] Zatrzymywanie serwera...")
+        print("\n[!] Stopping server...")
         RUNNING = False
         server.shutdown()
 

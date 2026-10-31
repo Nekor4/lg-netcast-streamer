@@ -34,15 +34,15 @@ Instead of the slow built-in WebKit browser, the project uses the TV's **native 
 ## Running
 
 ### 1. Window GUI – recommended (no console window in the background)
-Double-click **`LG_Streamer.pyw`** or **`uruchom_stream.bat`**.
+Double-click **`LG_Streamer.pyw`** or **`run_stream.bat`**.
 An ultra-lightweight dark app window opens (fully compatible with **PowerToys FancyZones** snapping, with no console in the background) that lets you, with one click:
 - pick a DLNA TV from the list of renderers found on the LAN,
-- switch the monitor on the fly (`Ekran 1` / `Ekran 2` / `Oba`, or keys `F1` / `F2` / `F3`),
-- change the resolution (`1080p Full HD` / `720p Szybki`), frame rate (`60 FPS` / `30 FPS`), bitrate and GPU encoder (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
-- start (`▶ WŁĄCZ / PRZEŁĄCZ NA TV`) and stop (`⏹ STOP`) the stream.
+- switch the monitor on the fly (`Screen 1` / `Screen 2` / `Both`, or keys `F1` / `F2` / `F3`),
+- change the resolution (`1080p Full HD` / `720p Fast`), frame rate (`60 FPS` / `30 FPS`), bitrate and GPU encoder (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
+- start (`▶ START / SWITCH TO TV`) and stop (`⏹ STOP`) the stream.
 
 ### 2. Console mode (CLI)
-Double-click **`uruchom_konsole.bat`** or run from a terminal:
+Double-click **`run_console.bat`** or run from a terminal:
 
 ```bash
 python netcast_hw_streamer.py --port 8000 --monitor 1 --fps 60 --height 1080 --bitrate 6M --encoder auto
