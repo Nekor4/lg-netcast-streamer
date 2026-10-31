@@ -797,11 +797,13 @@ def ssdp_Responder_and_announcer(local_ip, port, tv_ip="192.168.0.114"):
 # ==============================================================================
 # Uniwersalny kontroler UPnP AVTransport1 (wykrywanie dowolnego TV DLNA w LAN)
 # ==============================================================================
-def discover_all_dlna_renderers(hint_ip=None):
+def discover_all_dlna_renderers(hint_ip=None, preferred_name=None):
     """
     Wyszukuje wszystkie telewizory i odbiorniki DLNA (AVTransport:1) w sieci lokalnej.
-    Zwraca listę krotek: [(friendly_name, control_url, tv_ip), ...], z priorytetem dla LG 55LM670S.
+    Zwraca listę krotek: [(friendly_name, control_url, tv_ip), ...] posortowaną wg priorytetu:
+    preferred_name > LG 55LM670S > hint_ip > pozostałe.
     """
+    # The name outranks the IP: DHCP may hand the TV's old address to another device.
     q = '"'
     msg = (
         "M-SEARCH * HTTP/1.1\r\n"
@@ -871,13 +873,21 @@ def discover_all_dlna_renderers(hint_ip=None):
             ctrl_path = m_ctrl.group(1).strip() if m_ctrl else "/upnp/control/AVTransport1"
             if not ctrl_path.startswith("/"):
                 ctrl_path = "/" + ctrl_path
-            entry = (fname, base + ctrl_path, parsed.hostname)
-            if "55LM670S" in fname or (hint_ip and parsed.hostname == hint_ip):
-                renderers.insert(0, entry)
-            else:
-                renderers.append(entry)
+            renderers.append((fname, base + ctrl_path, parsed.hostname))
         except Exception:
             pass
+
+    def rank(entry):
+        name, _ctrl, ip = entry
+        if preferred_name and name == preferred_name:
+            return 0
+        if "55LM670S" in name:
+            return 1
+        if hint_ip and ip == hint_ip:
+            return 2
+        return 3
+
+    renderers.sort(key=rank)
     return renderers
 
 

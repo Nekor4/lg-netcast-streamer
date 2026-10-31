@@ -92,6 +92,8 @@ class StreamerGUI:
 
         saved = self._load_settings()
         self.tv_ip_var = tk.StringVar(value=saved.get("tv_ip", "192.168.0.114"))
+        # The TV is remembered by its UPnP friendly name; tv_ip is only a discovery hint
+        self.tv_name = saved.get("tv_name", "")
         self.monitor_var = tk.IntVar(value=saved.get("monitor", 1))
         self.height_var = tk.IntVar(value=saved.get("height", 1080))
         self.fps_var = tk.IntVar(value=saved.get("fps", 60))
@@ -136,6 +138,7 @@ class StreamerGUI:
                 json.dump(
                     {
                         "tv_ip": self.tv_ip_var.get().strip(),
+                        "tv_name": self.tv_name,
                         "monitor": self.monitor_var.get(),
                         "height": self.height_var.get(),
                         "fps": self.fps_var.get(),
@@ -376,25 +379,24 @@ class StreamerGUI:
         raw = self.tv_ip_var.get().strip()
         # Wyciągnij sam adres IP jeśli w polu była nazwa z listy
         hint = raw.split()[-1].strip("()") if " " in raw else (raw or "192.168.0.114")
-        self.set_status(f"Szukanie TV w sieci ({hint})...")
-        found = core.discover_all_dlna_renderers(hint_ip=hint)
-        self.renderers = found
+        self.set_status(f"Szukanie TV w sieci ({self.tv_name or hint})...")
+        found = core.discover_all_dlna_renderers(hint_ip=hint, preferred_name=self.tv_name)
+        self._set_renderers(found)
+        target = self._find_remembered_tv(found)
 
-        if found:
-            values = [f"{ip} ({name})" for name, _ctrl, ip in found]
-            first_ip = found[0][2]
-            local_ip = core.get_preferred_ip(first_ip)
+        if target:
+            name, _ctrl, ip = target
+            self.tv_name = name
+            local_ip = core.get_preferred_ip(ip)
             core.BASE_HTTP_URL = f"http://{local_ip}:{self.port}"
-
-            def _upd():
-                self.tv_combo["values"] = values
-                self.tv_ip_var.set(first_ip)
-
-            self.root.after(0, _upd)
-            self.set_status(f"Połączono: {found[0][0]} ({first_ip})")
+            self.root.after(0, lambda: self.tv_ip_var.set(ip))
+            self.set_status(f"Połączono: {name} ({ip})")
             if initial_auto_push:
                 time.sleep(1.5)
                 self._push_worker()
+        elif found:
+            # Never fall back to another TV on its own; the user picks one from the list instead
+            self.set_status(f"Nie znaleziono TV: {self.tv_name} • wybierz odbiornik z listy")
         else:
             local_ip = core.get_preferred_ip(hint)
             core.BASE_HTTP_URL = f"http://{local_ip}:{self.port}"
@@ -403,23 +405,41 @@ class StreamerGUI:
     def scan_tvs_async(self):
         threading.Thread(target=self._scan_tvs_worker, args=(False,), daemon=True).start()
 
+    def _set_renderers(self, found):
+        self.renderers = found
+        values = [f"{ip} ({name})" for name, _ctrl, ip in found]
+        self.root.after(0, lambda: self.tv_combo.configure(values=values))
+
+    def _find_remembered_tv(self, renderers):
+        """Zapamiętany TV (po nazwie) albo, jeśli żadnego nie zapamiętano, pierwszy z listy."""
+        if not self.tv_name:
+            return renderers[0] if renderers else None
+        return next((r for r in renderers if r[0] == self.tv_name), None)
+
     def _on_tv_selected(self, _event=None):
         val = self.tv_ip_var.get().strip()
-        if " " in val:
-            self.tv_ip_var.set(val.split()[0])
+        ip, _sep, rest = val.partition(" (")
+        if rest.endswith(")"):
+            self.tv_name = rest[:-1]
+            self.tv_ip_var.set(ip)
         self._save_settings()
 
-    def _get_active_control_url(self):
+    def _get_active_control_url(self, refresh=False):
         raw = self.tv_ip_var.get().strip()
         ip_only = raw.split()[0] if " " in raw else raw
-        for _name, ctrl, ip in self.renderers:
-            if ip == ip_only:
-                return ctrl, ip
-        found = core.discover_all_dlna_renderers(hint_ip=ip_only)
-        if found:
-            self.renderers = found
-            return found[0][1], found[0][2]
-        return None, ip_only
+        if not refresh:
+            for name, ctrl, ip in self.renderers:
+                if (name == self.tv_name) if self.tv_name else (ip == ip_only):
+                    return ctrl, ip
+        found = core.discover_all_dlna_renderers(hint_ip=ip_only, preferred_name=self.tv_name)
+        self._set_renderers(found)
+        target = self._find_remembered_tv(found)
+        if target:
+            name, ctrl, ip = target
+            self.tv_name = name
+            self.root.after(0, lambda: self.tv_ip_var.set(ip))
+            return ctrl, ip
+        return None, self.tv_name or ip_only
 
     def on_profile_change(self):
         mon = self.monitor_var.get()
@@ -432,18 +452,27 @@ class StreamerGUI:
         self.push_to_tv_async()
 
     def _push_worker(self):
-        self._save_settings()
         ctrl_url, tv_ip = self._get_active_control_url()
         if not ctrl_url:
             self.set_status(f"Brak odpowiedzi z TV ({tv_ip})")
             return
+        self._save_settings()
+        if self._push_stream(ctrl_url, tv_ip):
+            return
+        # The cached control URL goes stale once DHCP gives the TV a new IP: rediscover and retry once
+        new_ctrl, new_ip = self._get_active_control_url(refresh=True)
+        if new_ctrl and new_ctrl != ctrl_url:
+            self._save_settings()
+            self._push_stream(new_ctrl, new_ip)
+
+    def _push_stream(self, ctrl_url, tv_ip):
         local_ip = core.get_preferred_ip(tv_ip)
         core.BASE_HTTP_URL = f"http://{local_ip}:{self.port}"
         mon = self.monitor_var.get()
         h = self.height_var.get()
         stream_url = f"{core.BASE_HTTP_URL}/live/mon{mon}_{h}.mpg?t={int(time.time())}"
         self.set_status(f"Przełączanie na TV ({tv_ip}) -> Ekran {mon}, {h}p @ {self.fps_var.get()} FPS...")
-        core.push_stream_to_tv_dlna(ctrl_url, stream_url)
+        return core.push_stream_to_tv_dlna(ctrl_url, stream_url)
 
     def push_to_tv_async(self):
         threading.Thread(target=self._push_worker, daemon=True).start()
