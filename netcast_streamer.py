@@ -3,16 +3,16 @@
 """
 LG NetCast 3.0 (55LM670S-ZA) Low-Latency Screen Streamer & USB App Builder
 ==========================================================================
-Serwer strumieniujący obraz z pulpitu Windows bezpośrednio do przeglądarki
-lub aplikacji USB w telewizorze LG 55LM670S-ZA (NetCast 3.0 / WebKit 2012).
+Server streaming the Windows desktop straight to the browser or a USB app
+on the LG 55LM670S-ZA TV (NetCast 3.0 / 2012 WebKit).
 
-Cechy:
-- Zgodność z silnikiem WebKit z 2012 r. (czysty ES5 JS, brak buforowania opóźnień)
-- Podwójne buforowanie klatek (Zero-Lag Pull) oraz klasyczny strumień MJPEG
-- Rysowanie kursora myszy PC na przechwytywanym obrazie (Win32 API)
-- Opcjonalne sterowanie kursorem PC za pomocą pilota LG Magic Remote
-- Obsługa kolorowych przycisków pilota LG (Czerwony/Zielony/Żółty/Niebieski, 1-9)
-- Generator paczki USB (/lgapps/installed/...) dla telewizora LG NetCast
+Features:
+- Compatible with the 2012 WebKit engine (plain ES5 JS, no latency-adding buffering)
+- Double-buffered frames (Zero-Lag Pull) plus a classic MJPEG stream
+- Draws the PC mouse cursor onto the captured image (Win32 API)
+- Optional PC cursor control with the LG Magic Remote
+- Handles LG remote color buttons (Red/Green/Yellow/Blue, 1-9)
+- USB package generator (/lgapps/installed/...) for LG NetCast TVs
 """
 
 import argparse
@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw
 
 
 # ==============================================================================
-# Win32 API: Kursor myszy (odczyt pozycji + opcjonalne sterowanie z pilota TV)
+# Win32 API: mouse cursor (position readout + optional control from the TV remote)
 # ==============================================================================
 user32 = ctypes.windll.user32
 
@@ -62,7 +62,7 @@ def get_cursor_pos():
 
 
 def move_and_click_pc_mouse(norm_x, norm_y, monitor_rect, action="click"):
-    """Przesuwa kursor na PC w miejsce wskazane pilotem Magic Remote na TV."""
+    """Moves the PC cursor to the spot pointed at with the Magic Remote on the TV."""
     try:
         target_x = int(monitor_rect["left"] + norm_x * monitor_rect["width"])
         target_y = int(monitor_rect["top"] + norm_y * monitor_rect["height"])
@@ -78,7 +78,7 @@ def move_and_click_pc_mouse(norm_x, norm_y, monitor_rect, action="click"):
 
 
 # ==============================================================================
-# Stan globalny i wątek przechwytywania ekranu (Zero-Lag Producer)
+# Global state and screen capture thread (Zero-Lag Producer)
 # ==============================================================================
 class StreamState:
     def __init__(self):
@@ -88,14 +88,14 @@ class StreamState:
         self.frame_id = 0
         self.fps = 0.0
 
-        # Ustawienia sterowane z poziomu TV (w locie)
-        self.monitor_index = 1       # 1 = główny monitor w mss
+        # Settings controlled from the TV (on the fly)
+        self.monitor_index = 1       # 1 = primary monitor in mss
         self.monitor_count = 1
         self.monitor_rect = {"left": 0, "top": 0, "width": 1920, "height": 1080}
-        self.scale_height = 720      # 720p domyślnie (najpłynniejsze na Wi-Fi 2.4GHz i CPU TV)
+        self.scale_height = 720      # 720p by default (smoothest on 2.4 GHz Wi-Fi and the TV's CPU)
         self.jpeg_quality = 70       # 10..95
-        self.draw_cursor = True      # Rysuj kursor myszy PC na ekranie TV
-        self.remote_control = False  # Czy kliknięcia na TV klikają na PC
+        self.draw_cursor = True      # Draw the PC mouse cursor on the TV screen
+        self.remote_control = False  # Whether clicks on the TV click on the PC
         self.target_fps = 30
         self.running = True
 
@@ -104,7 +104,7 @@ STATE = StreamState()
 
 
 def draw_mouse_pointer(img, mon_rect, scale_x, scale_y):
-    """Rysuje wyraźny, kontrastowy kursor myszy na obrazie wysyłanym do TV."""
+    """Draws a clear, high-contrast mouse cursor on the image sent to the TV."""
     pos = get_cursor_pos()
     if not pos:
         return
@@ -118,7 +118,7 @@ def draw_mouse_pointer(img, mon_rect, scale_x, scale_y):
     py = int(rel_y * scale_y)
 
     draw = ImageDraw.Draw(img)
-    # Strzałka kursora z czarną obwódką i białym/żółtym środkiem (dobrze widoczna na TV)
+    # Cursor arrow with a black outline and white/yellow fill (easy to see on the TV)
     poly = [
         (px, py),
         (px, py + 18),
@@ -132,7 +132,7 @@ def draw_mouse_pointer(img, mon_rect, scale_x, scale_y):
 
 
 def make_fallback_image(width, height, message):
-    """Tworzy planszę informacyjną, gdy GDI BitBlt jest chwilowo niedostępny (np. UAC / ekran blokady)."""
+    """Creates an info card when GDI BitBlt is temporarily unavailable (e.g. UAC / lock screen)."""
     img = Image.new("RGB", (width, height), color=(18, 22, 34))
     draw = ImageDraw.Draw(img)
     draw.rectangle([30, 30, width - 30, height - 30], outline=(88, 166, 255), width=3)
@@ -143,7 +143,7 @@ def make_fallback_image(width, height, message):
 
 
 def capture_loop():
-    """Wątek w tle przechwytujący ekran i kompresujący klatki do pamięci RAM."""
+    """Background thread that captures the screen and compresses frames into RAM."""
     with mss.MSS() as sct:
         STATE.monitor_count = max(1, len(sct.monitors) - 1)
         frame_counter = 0
@@ -173,7 +173,7 @@ def capture_loop():
                     if STATE.draw_cursor:
                         draw_mouse_pointer(img, mon, scale_x, scale_y)
                 except Exception as grab_err:
-                    # Np. ekran UAC lub uruchomienie z piaskownicy bez dostępu do pulpitu
+                    # E.g. a UAC prompt or running from a sandbox without desktop access
                     img = make_fallback_image(
                         1280,
                         720,
@@ -186,7 +186,7 @@ def capture_loop():
                     format="JPEG",
                     quality=STATE.jpeg_quality,
                     optimize=False,
-                    subsampling=2,  # 4:2:0 - najszybsze dekodowanie sprzętowe w TV LG
+                    subsampling=2,  # 4:2:0 - fastest hardware decoding on LG TVs
                 )
                 jpeg_bytes = buf.getvalue()
 
@@ -212,7 +212,7 @@ def capture_loop():
 
 
 # ==============================================================================
-# Aplikacja HTML5 / ES5 zoptymalizowana pod LG NetCast 3.0 (55LM670S-ZA)
+# HTML5 / ES5 app optimized for LG NetCast 3.0 (55LM670S-ZA)
 # ==============================================================================
 NETCAST_HTML = """<!DOCTYPE html>
 <html>
@@ -304,7 +304,7 @@ NETCAST_HTML = """<!DOCTYPE html>
 <body>
 
 <div id="stage">
-  <!-- Dwa bufory obrazów dla bezlagowego przełączania klatek na WebKit 2012 -->
+  <!-- Two image buffers for lag-free frame swapping on 2012 WebKit -->
   <img id="buf0" class="screen-buf" style="z-index: 2;" src="" alt="" />
   <img id="buf1" class="screen-buf" style="z-index: 1;" src="" alt="" />
 </div>
@@ -328,7 +328,7 @@ NETCAST_HTML = """<!DOCTYPE html>
 </div>
 
 <script type="text/javascript">
-  // Czysty ES5 (kompatybilny z przeglądarką WebKit w LG NetCast 3.0 z 2012 r.)
+  // Plain ES5 (compatible with the 2012 WebKit browser in LG NetCast 3.0)
   var buf0 = document.getElementById('buf0');
   var buf1 = document.getElementById('buf1');
   var hud = document.getElementById('hud');
@@ -338,7 +338,7 @@ NETCAST_HTML = """<!DOCTYPE html>
 
   var activeBuf = 0;
   var loading = false;
-  var streamMode = 'pull'; // 'pull' (Zero-Lag) lub 'mjpeg'
+  var streamMode = 'pull'; // 'pull' (Zero-Lag) or 'mjpeg'
   var clientFrames = 0;
   var clientFps = 0;
   var lastFpsTime = (new Date()).getTime();
@@ -399,7 +399,7 @@ NETCAST_HTML = """<!DOCTYPE html>
       statsText.innerHTML = 'TV FPS: ' + clientFps + ' kl./s | Rozdz.: ' + currentRes + 'p | Jakość: ' + currentQuality + '%';
     }
 
-    // Natychmiast pobierz kolejną najświeższą klatkę z serwera
+    // Immediately fetch the next freshest frame from the server
     setTimeout(requestNextFrame, 4);
   }
 
@@ -473,7 +473,7 @@ NETCAST_HTML = """<!DOCTYPE html>
     showHudTemporarily();
   }
 
-  // Obsługa kliknięcia kursorem LG Magic Remote na powierzchni obrazu
+  // Handle LG Magic Remote pointer clicks on the image
   document.getElementById('stage').onclick = function(ev) {
     var e = ev || window.event;
     var w = window.innerWidth || document.documentElement.clientWidth || 1920;
@@ -490,13 +490,13 @@ NETCAST_HTML = """<!DOCTYPE html>
     }
   };
 
-  // Obsługa klawiszy pilota LG NetCast (cyfry 0-9, OK, kolorowe przyciski)
+  // Handle LG NetCast remote keys (digits 0-9, OK, color buttons)
   document.onkeydown = function(ev) {
     var e = ev || window.event;
     var k = e.keyCode || e.which;
 
     // 49='1', 50='2', 51='3', 52='4', 53='5', 54='6', 55='7', 48='0', 13=OK
-    // Kolorowe klawisze LG NetCast: 403=Czerwony, 404=Zielony, 405=Żółty, 406=Niebieski
+    // LG NetCast color keys: 403=Red, 404=Green, 405=Yellow, 406=Blue
     if (k === 49) { setRes(540); }
     else if (k === 50) { setRes(720); }
     else if (k === 51) { setRes(1080); }
@@ -508,7 +508,7 @@ NETCAST_HTML = """<!DOCTYPE html>
     else { showHudTemporarily(); }
   };
 
-  // Start strumienia
+  // Start the stream
   showHudTemporarily();
   requestNextFrame();
 </script>
@@ -518,13 +518,13 @@ NETCAST_HTML = """<!DOCTYPE html>
 
 
 # ==============================================================================
-# Serwer HTTP obsługujący przeglądarkę i aplikację NetCast
+# HTTP server serving the browser and the NetCast app
 # ==============================================================================
 class NetCastRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        # Wycisz logowanie każdej pojedynczej klatki w konsoli
+        # Silence console logging of every single frame
         if "/frame.jpg" in self.path or "/api/mouse" in self.path:
             return
         print(f"[HTTP] {self.address_string()} - {fmt % args}")
@@ -601,7 +601,7 @@ class NetCastRequestHandler(BaseHTTPRequestHandler):
                     val = int(qs["jpeg_quality"][0])
                     STATE.jpeg_quality = max(20, min(95, val))
                 if "next_monitor" in qs:
-                    # Przełączaj cyklicznie: 1 -> 2 -> ... -> 0 (wszystkie) -> 1
+                    # Cycle: 1 -> 2 -> ... -> 0 (all) -> 1
                     STATE.monitor_index = (STATE.monitor_index + 1) % (STATE.monitor_count + 1)
                 if "remote_control" in qs:
                     STATE.remote_control = qs["remote_control"][0] == "1"
@@ -645,18 +645,18 @@ class NetCastRequestHandler(BaseHTTPRequestHandler):
 
 
 # ==============================================================================
-# Generator struktury aplikacji USB dla LG NetCast (/lgapps/installed/100001/)
+# USB app structure generator for LG NetCast (/lgapps/installed/100001/)
 # ==============================================================================
 def build_netcast_usb_package(output_dir, server_url):
     """
-    Tworzy gotową strukturę katalogów na pendrive USB (FAT32):
+    Creates a ready-made directory structure for a USB stick (FAT32):
       usb_netcast_pack/lgapps/installed/100001/
-    którą można skopiować bezpośrednio w główny katalog pendrive'a.
+    which can be copied straight into the root of the stick.
     """
     app_dir = os.path.join(output_dir, "lgapps", "installed", "100001")
     os.makedirs(app_dir, exist_ok=True)
 
-    # 1. index.html przekierowujący lub osadzający nasz serwer PC
+    # 1. index.html redirecting to or embedding our PC server
     usb_index = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -680,7 +680,7 @@ def build_netcast_usb_package(output_dir, server_url):
     with open(os.path.join(app_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(usb_index)
 
-    # 2. Plik info.xml / lgconfig.xml dla środowiska NetCast 3.0
+    # 2. info.xml / lgconfig.xml for the NetCast 3.0 environment
     lgconfig_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <lg_app_Wait>
     <app_info>
@@ -699,7 +699,7 @@ def build_netcast_usb_package(output_dir, server_url):
     with open(os.path.join(app_dir, "info.xml"), "w", encoding="utf-8") as f:
         f.write(lgconfig_xml)
 
-    # 3. Ikona aplikacji 130x130 PNG wymagana przez launcher NetCast
+    # 3. 130x130 PNG app icon required by the NetCast launcher
     icon = Image.new("RGB", (130, 130), color=(25, 95, 200))
     draw = ImageDraw.Draw(icon)
     draw.rectangle([12, 22, 118, 92], outline=(255, 255, 255), width=4)
@@ -711,7 +711,7 @@ def build_netcast_usb_package(output_dir, server_url):
 
 
 # ==============================================================================
-# Wykrywanie adresów IP komputera oraz telewizora LG w sieci lokalnej
+# Detection of the PC and LG TV IP addresses on the local network
 # ==============================================================================
 def get_local_ipv4_addresses():
     ips = []
@@ -728,7 +728,7 @@ def get_local_ipv4_addresses():
 
 
 def discover_lg_netcast_tv(timeout=1.5):
-    """Wysyła zapytanie SSDP M-SEARCH szukające telewizora LG NetCast / DLNA w LAN."""
+    """Sends an SSDP M-SEARCH query looking for an LG NetCast / DLNA TV on the LAN."""
     ssdp_Msg = (
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
@@ -780,7 +780,7 @@ def main():
     primary_ip = next((ip for ip in ips if ip.startswith("192.168.")), ips[0] if ips else "127.0.0.1")
     server_url = f"http://{primary_ip}:{args.port}"
 
-    # Wygeneruj paczkę USB dla NetCast
+    # Generate the USB package for NetCast
     usb_out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usb_netcast_pack")
     app_dir = build_netcast_usb_package(usb_out, server_url)
 
@@ -812,11 +812,11 @@ def main():
     print("    2. Włóż pendrive do TV -> Moje Aplikacje (My Apps) -> ikona USB.")
     print("=" * 72)
 
-    # Uruchom wątek przechwytywania ekranu
+    # Start the screen capture thread
     cap_thread = threading.Thread(target=capture_loop, daemon=True)
     cap_thread.start()
 
-    # Uruchom wielowątkowy serwer HTTP
+    # Start the multithreaded HTTP server
     server = ThreadingHTTPServer(("0.0.0.0", args.port), NetCastRequestHandler)
     try:
         server.serve_forever()

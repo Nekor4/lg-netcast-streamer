@@ -3,17 +3,17 @@
 """
 LG 55LM670S-ZA Hardware H.264 (RTX 3070 Ti NVENC 60 FPS) + WASAPI Audio Streamer
 ================================================================================
-Pełny serwer DLNA MediaServer (Smart Share) + AVTransport Push dla LG NetCast 3.0.
+Full DLNA MediaServer (Smart Share) + AVTransport push for LG NetCast 3.0.
 
-Dlaczego to działa w 60 FPS z dźwiękiem:
-- Omija powolną przeglądarkę WebKit z 2012 r. i używa natywnego, sprzętowego
-  dekodera wideo/audio ASIC w telewizorze LG (Smart Share / DLNA).
-- Karta NVIDIA GeForce RTX 3070 Ti koduje obraz w czasie rzeczywistym (h264_nvenc,
-  profil Main @ Level 4.1, 1280x720 60 FPS lub 1920x1080, 0 B-frames).
-- Dźwięk z komputera (Głośniki Realtek WASAPI Loopback) jest przechwytywany
-  w pojedynczym wątku i multipleksowany jako stereo MP2 48 kHz w strumieniu MPEG-TS.
-- Serwer wystawia się w sieci domowej jako serwer DLNA "[PC] Pulpit RTX 60FPS",
-  widoczny bezpośrednio na telewizorze pod przyciskiem INPUT / Smart Share!
+Why this runs at 60 FPS with audio:
+- It bypasses the slow 2012 WebKit browser and uses the LG TV's native hardware
+  video/audio ASIC decoder (Smart Share / DLNA).
+- The NVIDIA GeForce RTX 3070 Ti encodes the screen in real time (h264_nvenc,
+  Main profile @ Level 4.1, 1280x720 60 FPS or 1920x1080, 0 B-frames).
+- PC audio (Realtek speakers, WASAPI loopback) is captured in a single thread
+  and muxed as 48 kHz stereo MP2 into the MPEG-TS stream.
+- The server announces itself on the home network as the DLNA server
+  "[PC] Pulpit RTX 60FPS", visible on the TV under INPUT / Smart Share.
 """
 
 import argparse
@@ -35,7 +35,7 @@ import pyaudiowpatch as pyaudio
 
 
 # ==============================================================================
-# Stałe DLNA / UPnP dla LG NetCast 3.0 (LGE_DLNA_SDK/1.5.0)
+# DLNA / UPnP constants for LG NetCast 3.0 (LGE_DLNA_SDK/1.5.0)
 # ==============================================================================
 SERVER_UUID = "uuid:8f9a1b2c-3d4e-5f6a-7b8c-9d0e1f2a3b4c"
 FRIENDLY_NAME = "[PC] Pulpit RTX 60FPS + Audio"
@@ -50,7 +50,7 @@ DLNA_PROTOCOL_INFO = f"http-get:*:video/mpeg:{DLNA_ORG_FEATURES}"
 
 
 # ==============================================================================
-# Globalny stan strumienia i Broadcaster MPEG-TS
+# Global stream state and MPEG-TS broadcaster
 # ==============================================================================
 class StreamBroadcaster:
     def __init__(self):
@@ -108,8 +108,8 @@ class StreamBroadcaster:
                         pass
 
     def add_client(self):
-        # Kolejka 240 paczek (ok. 900 KB) chroni przed mikro-przycięciami Wi-Fi:
-        # NIGDY nie porzucamy pojedynczych pakietów ze środka klatki H.264 (zero glitchy/makrobloków!)
+        # A 240-chunk queue (~900 KB) absorbs Wi-Fi micro-stalls:
+        # NEVER drop single packets from the middle of an H.264 frame (no glitches/macroblocking!)
         q = queue.Queue(maxsize=240)
         with self.lock:
             self.clients.add(q)
@@ -128,7 +128,7 @@ class StreamBroadcaster:
                 try:
                     q.put_nowait(chunk)
                 except queue.Full:
-                    # Jeśli klient całkowicie przestał odbierać (>900KB zaległości), wyczyść kolejkę w całości
+                    # If the client stopped reading entirely (>900 KB backlog), flush the whole queue
                     try:
                         while not q.empty():
                             q.get_nowait()
@@ -145,7 +145,7 @@ RUNNING = True
 
 
 # ==============================================================================
-# Pojedynczy globalny wątek WASAPI Loopback (zero duplikacji, zero spamu)
+# Single global WASAPI loopback thread (no duplicates, no log spam)
 # ==============================================================================
 def global_wasapi_capture_thread():
     frames_per_chunk = 960  # 20 ms @ 48000 Hz
@@ -292,15 +292,15 @@ def feed_stdin_audio(ffmpeg_stdin):
 
 
 # ==============================================================================
-# Automatyczne wykrywanie najlepszego kodera H.264 (NVIDIA / AMD / Intel / CPU)
+# Automatic detection of the best H.264 encoder (NVIDIA / AMD / Intel / CPU)
 # ==============================================================================
-DETECTED_ENCODER = None  # ("nazwa", funkcja_argumentow(bitrate))
+DETECTED_ENCODER = None  # (name, build_args(bitrate))
 
 
 def detect_best_h264_encoder(ffmpeg_exe, requested="auto"):
     """
-    Sprawdza dostępne w systemie kodery sprzętowe GPU (NVIDIA NVENC -> AMD AMF -> Intel QSV)
-    i w razie braku dedykowanego GPU przełącza na wielowątkowy koder CPU (libx264 ultrafast).
+    Probes the system for hardware GPU encoders (NVIDIA NVENC -> AMD AMF -> Intel QSV)
+    and falls back to the multithreaded CPU encoder (libx264 ultrafast) when no GPU is available.
     """
     global DETECTED_ENCODER
     if DETECTED_ENCODER is not None and requested == "auto":
@@ -408,7 +408,7 @@ def detect_best_h264_encoder(ffmpeg_exe, requested="auto"):
 
 
 # ==============================================================================
-# Koder FFmpeg: Uniwersalny potok GPU/CPU + WASAPI Audio
+# FFmpeg encoder: universal GPU/CPU pipeline + WASAPI audio
 # ==============================================================================
 def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", encoder_pref="auto"):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -418,7 +418,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
     BROADCASTER.active_bitrate = bitrate
     BROADCASTER.active_encoder = encoder_pref
 
-    # Podnieś priorytet procesu Pythona, aby edytory Unity/gry nie przywłaszczały czasu CPU
+    # Raise the Python process priority so Unity editors/games don't starve it of CPU time
     try:
         import ctypes
         ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00000080)
@@ -449,7 +449,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
         if out_w > 1920:
             out_w = 1920
 
-        # Przechwytywanie przez DirectX 11 ddagrab (z automatycznym fallbackiem do gdigrab)
+        # DirectX 11 ddagrab capture (with automatic fallback to gdigrab)
         if BROADCASTER.use_ddagrab and mon_idx in (1, 2):
             dda_idx = mon_idx - 1
             video_input_args = [
@@ -482,7 +482,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
             "-fflags", "nobuffer",
             "-flags", "low_delay",
             *video_input_args,
-            # Wejście 1: Dźwięk systemowy WASAPI
+            # Input 1: WASAPI system audio
             "-probesize", "32",
             "-analyzeduration", "0",
             "-f", "s16le",
@@ -494,16 +494,16 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
             "-map", "1:a:0",
             "-vf", vf_chain,
             "-threads", "4",
-            # Uniwersalne argumenty wykrytego kodera (NVENC / AMF / QSV / libx264)
+            # Arguments of the detected encoder (NVENC / AMF / QSV / libx264)
             *enc_builder(cur_bitrate),
             "-flags", "+global_header",
             "-bsf:v", "h264_metadata=level=4.1,dump_extra=freq=keyframe",
-            # Koder audio MP2 stereo
+            # MP2 stereo audio encoder
             "-c:a", "mp2",
             "-b:a", "192k",
             "-ar", "48000",
             "-ac", "2",
-            # Kontener MPEG-TS
+            # MPEG-TS container
             "-f", "mpegts",
             "-mpegts_flags", "resend_headers+initial_discontinuity",
             "-max_delay", "0",
@@ -534,7 +534,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
         try:
             stdout_fd = proc.stdout.fileno()
             while RUNNING:
-                # 15040 bajtów = 80 * 188 bajtów pakietu MPEG-TS (4x mniejszy narzut GIL w Pythonie)
+                # 15040 bytes = 80 * 188-byte MPEG-TS packets (4x less GIL overhead in Python)
                 chunk = os.read(stdout_fd, 15040)
                 if not chunk:
                     break
@@ -547,7 +547,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
             except Exception:
                 pass
 
-        # Jeśli ddagrab zakończył się błędem w mniej niż 1.5s, przełącz awaryjnie na gdigrab
+        # If ddagrab failed within 1.5 s, fall back to gdigrab
         if RUNNING and BROADCASTER.use_ddagrab and (time.perf_counter() - t_launch) < 1.5:
             err_msg = ""
             try:
@@ -563,7 +563,7 @@ def ffmpeg_producer_loop(default_monitor=1, fps=60, height=1080, bitrate="6M", e
 
 
 # ==============================================================================
-# Wbudowany serwer UPnP / DLNA MediaServer (widoczny w Smart Share / INPUT)
+# Built-in UPnP / DLNA MediaServer (visible in Smart Share / INPUT)
 # ==============================================================================
 def build_root_desc_xml(base_url):
     return f"""<?xml version="1.0" encoding="utf-8"?>
@@ -721,7 +721,7 @@ def build_browse_response_soap(base_url, object_id, browse_flag):
 
 
 def ssdp_Responder_and_announcer(local_ip, port, tv_ip="192.168.0.114"):
-    """Rozgłasza nasz serwer DLNA MediaServer przez SSDP, aby od razu pojawił się w Smart Share na TV."""
+    """Announces our DLNA MediaServer over SSDP so it shows up in Smart Share on the TV right away."""
     location = f"http://{local_ip}:{port}/rootDesc.xml"
     nts_types = [
         ("upnp:rootdevice", f"{SERVER_UUID}::upnp:rootdevice"),
@@ -761,7 +761,7 @@ def ssdp_Responder_and_announcer(local_ip, port, tv_ip="192.168.0.114"):
 
     threading.Thread(target=announcer_loop, daemon=True).start()
 
-    # Nasłuchiwanie na zapytania M-SEARCH od telewizora LG
+    # Listen for M-SEARCH queries from the LG TV
     try:
         lsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -795,13 +795,13 @@ def ssdp_Responder_and_announcer(local_ip, port, tv_ip="192.168.0.114"):
 
 
 # ==============================================================================
-# Uniwersalny kontroler UPnP AVTransport1 (wykrywanie dowolnego TV DLNA w LAN)
+# Universal UPnP AVTransport1 controller (discovers any DLNA TV on the LAN)
 # ==============================================================================
 def discover_all_dlna_renderers(hint_ip=None, preferred_name=None):
     """
-    Wyszukuje wszystkie telewizory i odbiorniki DLNA (AVTransport:1) w sieci lokalnej.
-    Zwraca listę krotek: [(friendly_name, control_url, tv_ip), ...] posortowaną wg priorytetu:
-    preferred_name > LG 55LM670S > hint_ip > pozostałe.
+    Discovers all DLNA TVs and renderers (AVTransport:1) on the local network.
+    Returns a list of tuples [(friendly_name, control_url, tv_ip), ...] sorted by priority:
+    preferred_name > LG 55LM670S > hint_ip > the rest.
     """
     # The name outranks the IP: DHCP may hand the TV's old address to another device.
     q = '"'
@@ -813,7 +813,7 @@ def discover_all_dlna_renderers(hint_ip=None, preferred_name=None):
         "ST: urn:schemas-upnp-org:service:AVTransport:1\r\n\r\n"
     ).encode("ascii")
 
-    # Zbierz lokalne adresy IPv4 ze wszystkich aktywnych kart sieciowych (Wi-Fi / Ethernet)
+    # Collect local IPv4 addresses from all active network adapters (Wi-Fi / Ethernet)
     local_ips = []
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
@@ -965,7 +965,7 @@ def push_stream_to_tv_dlna(control_url, stream_url):
 
 
 def stop_tv_dlna(control_url):
-    """Zatrzymuje odtwarzanie DLNA na telewizorze."""
+    """Stops DLNA playback on the TV."""
     if not control_url:
         return False
     envelope = (
@@ -997,7 +997,7 @@ def stop_tv_dlna(control_url):
 
 
 # ==============================================================================
-# Serwer HTTP obsługujący zarówno DLNA MediaServer, jak i strumień MPEG-TS
+# HTTP server handling both the DLNA MediaServer and the MPEG-TS stream
 # ==============================================================================
 BASE_HTTP_URL = "http://192.168.0.85:8000"
 
@@ -1006,7 +1006,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        # Wycisz ewentualne odpytywanie starej karty przeglądarki (/frame.jpg)
+        # Silence polling from a stale browser tab (/frame.jpg)
         if "/frame.jpg" in self.path or "/api/mouse" in self.path:
             return
         print(f"[TV -> PC] {self.address_string()} {fmt % args}")
@@ -1118,7 +1118,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
             req_h = 720 if "720" in self.path else (1080 if "1080" in self.path else BROADCASTER.active_height)
             BROADCASTER.set_stream_profile(req_mon, req_h)
 
-            # Wyłącz algorytm Nagle'a (TCP_NODELAY) dla wysyłania pakietów w < 1 ms
+            # Disable Nagle's algorithm (TCP_NODELAY) to send packets in < 1 ms
             try:
                 self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
@@ -1146,13 +1146,13 @@ class DLNAHandler(BaseHTTPRequestHandler):
                 print(f"  [STRUMIEŃ] Telewizor ({self.address_string()}) zakończył odtwarzanie.")
             return
 
-        # Wycisz stare żądania /frame.jpg z poprzedniej otwartej karty przeglądarki
+        # Silence stale /frame.jpg requests from a previously open browser tab
         if self.path.startswith("/frame.jpg"):
             self.send_response(204)
             self.end_headers()
             return
 
-        # Strona informacyjna na porcie 8000
+        # Info page on port 8000
         info_html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>LG 55LM670S DLNA Streamer</title>
 <style>body{{background:#0d1117;color:#fff;font-family:Arial,sans-serif;padding:40px;font-size:22px;}}
@@ -1236,28 +1236,28 @@ def main():
         print("    [t] + ENTER -> Przełącz docelowy telewizor DLNA na następny z listy")
     print("=" * 78)
 
-    # 1. Start pojedynczego wątku WASAPI Loopback
+    # 1. Start the single WASAPI loopback thread
     threading.Thread(target=global_wasapi_capture_thread, daemon=True).start()
 
-    # 2. Start kodera FFmpeg (auto-detekcja GPU/CPU)
+    # 2. Start the FFmpeg encoder (GPU/CPU auto-detection)
     threading.Thread(
         target=ffmpeg_producer_loop,
         args=(args.monitor, args.fps, args.height, args.bitrate, args.encoder),
         daemon=True,
     ).start()
 
-    # 3. Start serwera HTTP/DLNA
+    # 3. Start the HTTP/DLNA server
     server = ThreadingHTTPServer(("0.0.0.0", args.port), DLNAHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    # 4. Start rozgłaszania UPnP SSDP
+    # 4. Start UPnP SSDP announcements
     threading.Thread(
         target=ssdp_Responder_and_announcer,
         args=(local_ip, args.port, tv_ip),
         daemon=True,
     ).start()
 
-    # 5. Automatyczna próba wypchnięcia przez DLNA AVTransport po 2 sekundach
+    # 5. Try an automatic DLNA AVTransport push after 2 seconds
     if ctrl_url:
         def initial_push():
             time.sleep(2.0)

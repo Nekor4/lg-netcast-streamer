@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ulki-lekki, natywny interfejs okienkowy (GUI) dla Universal DLNA Streamer
-=========================================================================
-Zaprojektowany pod kątem:
-- Zerowego obciążenia CPU/GPU przez samo okno (brak pętli odświeżania/timerów w tle)
-- Błyskawicznej zmiany rozmiaru i 100% kompatybilności z PowerToys FancyZones (pełny responsywny grid)
-- Natychmiastowego przełączania ekranów (Monitor 1 / Monitor 2 / Oba) i jakości jednym kliknięciem
+Ultra-lightweight native window GUI for the Universal DLNA Streamer
+===================================================================
+Designed for:
+- Zero CPU/GPU load from the window itself (no refresh loops/timers in the background)
+- Instant resizing and full PowerToys FancyZones compatibility (fully responsive grid)
+- One-click switching of screens (Monitor 1 / Monitor 2 / Both) and quality
 """
 
 import ctypes
@@ -28,7 +28,7 @@ SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stream
 
 
 def hide_console_if_present():
-    """Ukrywa ewentualne okno konsoli bez ingerencji w styl okna Win32 (pełna zgodność z FancyZones)."""
+    """Hides the console window, if any, without touching the Win32 window style (keeps FancyZones compatibility)."""
     try:
         hwnd_con = ctypes.windll.kernel32.GetConsoleWindow()
         if hwnd_con:
@@ -38,7 +38,7 @@ def hide_console_if_present():
 
 
 def free_port_if_in_use(port=8000):
-    """Zwalnia port 8000 po poprzedniej instancji bez otwierania okna konsoli."""
+    """Frees port 8000 from a previous instance without opening a console window."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.2)
     in_use = s.connect_ex(("127.0.0.1", port)) == 0
@@ -80,7 +80,7 @@ class StreamerGUI:
         self.root = root
         self.root.title("LG DLNA Streamer")
         self.root.geometry("460x310")
-        # Mały minsize i pełna elastyczność (resizable True/True) dla PowerToys FancyZones
+        # Small minsize and fully resizable (True/True) for PowerToys FancyZones
         self.root.minsize(240, 160)
         self.root.resizable(True, True)
         self.root.configure(bg=self.BG)
@@ -163,14 +163,14 @@ class StreamerGUI:
         return result
 
     def _build_lightweight_ui(self):
-        """Buduje responsywny układ oparty na pojedynczej siatce grid (maksymalna szybkość podczas zmiany rozmiaru)."""
+        """Builds a responsive layout on a single grid (fastest possible resizing)."""
         main = tk.Frame(self.root, bg=self.BG, padx=10, pady=8)
         main.pack(fill="both", expand=True)
 
         main.columnconfigure(1, weight=1)
         main.rowconfigure(4, weight=1)
 
-        # Wiersz 0: Telewizor IP + Szukaj
+        # Row 0: TV IP + Search
         tk.Label(main, text="TV IP:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=0, column=0, sticky="w", pady=(0, 6)
         )
@@ -197,7 +197,7 @@ class StreamerGUI:
             command=self.scan_tvs_async,
         ).grid(row=0, column=1)
 
-        # Wiersz 1: Wybór Ekranu (szybkie natywne przyciski rozciągane w gridzie)
+        # Row 1: screen selection (fast native buttons stretched in the grid)
         tk.Label(main, text="Ekran:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=1, column=0, sticky="w", pady=4
         )
@@ -217,7 +217,7 @@ class StreamerGUI:
             btn.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 4, 0))
             self.mon_buttons[m_id] = btn
 
-        # Wiersz 2: Jakość / Rozdzielczość
+        # Row 2: quality / resolution
         tk.Label(main, text="Jakość:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=2, column=0, sticky="w", pady=4
         )
@@ -238,7 +238,7 @@ class StreamerGUI:
             btn.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 4, 0))
             self.res_buttons[h_val] = btn
 
-        # Wiersz 3: FPS + Bitrate + Koder (kompaktowe listy)
+        # Row 3: FPS + bitrate + encoder (compact dropdowns)
         tk.Label(main, text="Opcje:", font=("Segoe UI", 9, "bold"), bg=self.BG, fg=self.FG_DIM).grid(
             row=3, column=0, sticky="w", pady=4
         )
@@ -268,7 +268,7 @@ class StreamerGUI:
         enc_cb.grid(row=0, column=2, sticky="ew", padx=(4, 0))
         enc_cb.bind("<<ComboboxSelected>>", lambda _e: self.on_profile_change())
 
-        # Wiersz 4: Główne przyciski akcji (rozciągają się proporcjonalnie w FancyZones)
+        # Row 4: main action buttons (scale proportionally in FancyZones)
         act_frame = tk.Frame(main, bg=self.BG)
         act_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(8, 4))
         act_frame.columnconfigure(0, weight=3)
@@ -299,7 +299,7 @@ class StreamerGUI:
             command=self.stop_on_tv_async,
         ).grid(row=0, column=1, sticky="nsew")
 
-        # Wiersz 5: Lekki pasek statusu (aktualizowany wyłącznie zdarzeniowo - 0% CPU w spoczynku)
+        # Row 5: lightweight status bar (event-driven updates only - 0% CPU when idle)
         tk.Label(
             main,
             textvariable=self.status_var,
@@ -377,7 +377,7 @@ class StreamerGUI:
 
     def _scan_tvs_worker(self, initial_auto_push=False):
         raw = self.tv_ip_var.get().strip()
-        # Wyciągnij sam adres IP jeśli w polu była nazwa z listy
+        # Extract just the IP address if the field holds a name from the list
         hint = raw.split()[-1].strip("()") if " " in raw else (raw or "192.168.0.114")
         self.set_status(f"Szukanie TV w sieci ({self.tv_name or hint})...")
         found = core.discover_all_dlna_renderers(hint_ip=hint, preferred_name=self.tv_name)
@@ -411,7 +411,7 @@ class StreamerGUI:
         self.root.after(0, lambda: self.tv_combo.configure(values=values))
 
     def _find_remembered_tv(self, renderers):
-        """Zapamiętany TV (po nazwie) albo, jeśli żadnego nie zapamiętano, pierwszy z listy."""
+        """The remembered TV (by name) or, when none is remembered, the first one on the list."""
         if not self.tv_name:
             return renderers[0] if renderers else None
         return next((r for r in renderers if r[0] == self.tv_name), None)

@@ -1,14 +1,14 @@
 #!/usr/bin/env pythonw
 # -*- coding: utf-8 -*-
 """
-Natywny skrypt okienkowy Windows (.pyw) - uruchamia się przez pythonw.exe
-bez otwierania jakiegokolwiek okna konsoli cmd.exe w tle.
+Native Windows GUI script (.pyw) - runs via pythonw.exe
+without opening any cmd.exe console window in the background.
 """
 import os
 import subprocess
 import sys
 
-# Automatycznie doinstaluj zależności w tle, jeśli uruchamiane na nowym PC
+# Install missing dependencies in the background when run on a new PC
 try:
     import mss
     import PIL

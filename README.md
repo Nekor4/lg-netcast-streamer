@@ -1,58 +1,58 @@
 # LG NetCast 3.0 (55LM670S-ZA) Hardware Screen & Audio Streamer
 
-Niskolatencyjny streamer obrazu pulpitu Windows (**Full HD 1080p @ 60 FPS**) oraz dźwięku systemowego (**WASAPI Loopback Stereo**) przeznaczony dla starszych telewizorów **LG Smart TV z systemem NetCast 3.0 (np. seria LM670S z 2012 r.)**.
+Low-latency streamer of the Windows desktop (**Full HD 1080p @ 60 FPS**) and system audio (**WASAPI Loopback Stereo**) for older **LG Smart TVs running NetCast 3.0 (e.g. the 2012 LM670S series)**.
 
-Zamiast korzystać z powolnej wbudowanej przeglądarki WebKit, projekt wykorzystuje **natywny sprzętowy dekoder H.264 + Audio ASIC telewizora** poprzez protokół **UPnP / DLNA (`AVTransport1` Push oraz `ContentDirectory` MediaServer)**.
-
----
-
-## Główne możliwości
-
-- **Przechwytywanie 60 FPS przez DirectX 11 (`ddagrab`):** Pobiera obraz bezpośrednio z kompozytora DWM w systemie Windows 10/11 (z automatycznym fallbackiem do `gdigrab`).
-- **Sprzętowe kodowanie NVIDIA NVENC (`h264_nvenc`):**
-  - Profil `High` w trybie *Ultra-Low-Latency* (`-preset p1 -tune ull -zerolatency 1 -delay 0 -bf 0`).
-  - Przepisanie metadanych strumienia (`h264_metadata=level=4.1`) pozwalające na odtwarzanie **Full HD 1080p @ 60 FPS** na starszych dekoderach sprzętowych z 2012 r. wymagających flagi `Level 4.1`.
-  - Powtarzanie nagłówków `SPS`/`PPS`/`AUD` na każdej klatce kluczowej (`dump_extra=freq=keyframe`).
-- **Przechwytywanie dźwięku systemowego Windows (`PyAudioWPatch` / WASAPI Loopback):**
-  - Przesyła dźwięk prosto z domyślnych głośników/słuchawek bez konieczności instalowania wirtualnych kabli audio.
-  - Automatycznie generuje ramki ciszy, gdy na komputerze nic nie gra, utrzymując ciągłość strumienia MPEG-TS.
-- **Sterowanie z konsoli PC:** Przełączanie monitorów (`Monitor 1` / `Monitor 2`) oraz rozdzielczości (`1080p60` / `720p60`) w locie za pomocą klawiszy `1`–`4`.
+Instead of the slow built-in WebKit browser, the project uses the TV's **native hardware H.264 decoder + audio ASIC** over **UPnP / DLNA (`AVTransport1` push and a `ContentDirectory` MediaServer)**.
 
 ---
 
-## Wymagania
+## Key features
 
-- Windows 10 / 11 z kartą graficzną NVIDIA obsługującą `h264_nvenc`
+- **60 FPS capture via DirectX 11 (`ddagrab`):** Grabs frames straight from the DWM compositor on Windows 10/11 (with automatic fallback to `gdigrab`).
+- **NVIDIA NVENC hardware encoding (`h264_nvenc`):**
+  - `High` profile in *Ultra-Low-Latency* mode (`-preset p1 -tune ull -zerolatency 1 -delay 0 -bf 0`).
+  - Rewritten stream metadata (`h264_metadata=level=4.1`) that lets older 2012 hardware decoders requiring the `Level 4.1` flag play **Full HD 1080p @ 60 FPS**.
+  - `SPS`/`PPS`/`AUD` headers repeated on every keyframe (`dump_extra=freq=keyframe`).
+- **Windows system audio capture (`PyAudioWPatch` / WASAPI Loopback):**
+  - Sends audio straight from the default speakers/headphones, with no virtual audio cables to install.
+  - Generates silence frames automatically when nothing is playing, keeping the MPEG-TS stream continuous.
+- **Control from the PC console:** Switch monitors (`Monitor 1` / `Monitor 2`) and resolution (`1080p60` / `720p60`) on the fly with keys `1`–`4`.
+
+---
+
+## Requirements
+
+- Windows 10 / 11 with an NVIDIA GPU supporting `h264_nvenc`
 - Python 3.10+
-- Pakiety z `requirements.txt`:
+- Packages from `requirements.txt`:
   ```bash
   pip install -r requirements.txt
   ```
 
 ---
 
-## Uruchomienie
+## Running
 
-### 1. Interfejs okienkowy (GUI) – Zalecany (bez okna konsoli w tle)
-Kliknij dwukrotnie **`LG_Streamer.pyw`** lub **`uruchom_stream.bat`**.
-Otworzy się ultra-lekkie, ciemne okno aplikacji (w 100% kompatybilne z przyciąganiem do stref **PowerToys FancyZones** i bez żadnej konsoli w tle) pozwalające jednym kliknięciem:
-- wybrać telewizor DLNA z listy wykrytych odbiorników w sieci LAN,
-- przełączać monitor (`Ekran 1` / `Ekran 2` / `Oba` lub klawiszami `F1` / `F2` / `F3`) w locie,
-- zmieniać rozdzielczość (`1080p Full HD` / `720p Szybki`), płynność (`60 FPS` / `30 FPS`), bitrate i koder GPU (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
-- włączać (`▶ WŁĄCZ / PRZEŁĄCZ NA TV`) oraz zatrzymywać (`⏹ STOP`) strumień.
+### 1. Window GUI – recommended (no console window in the background)
+Double-click **`LG_Streamer.pyw`** or **`uruchom_stream.bat`**.
+An ultra-lightweight dark app window opens (fully compatible with **PowerToys FancyZones** snapping, with no console in the background) that lets you, with one click:
+- pick a DLNA TV from the list of renderers found on the LAN,
+- switch the monitor on the fly (`Ekran 1` / `Ekran 2` / `Oba`, or keys `F1` / `F2` / `F3`),
+- change the resolution (`1080p Full HD` / `720p Szybki`), frame rate (`60 FPS` / `30 FPS`), bitrate and GPU encoder (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
+- start (`▶ WŁĄCZ / PRZEŁĄCZ NA TV`) and stop (`⏹ STOP`) the stream.
 
-### 2. Tryb konsolowy (CLI)
-Kliknij dwukrotnie **`uruchom_konsole.bat`** lub uruchom z terminala:
+### 2. Console mode (CLI)
+Double-click **`uruchom_konsole.bat`** or run from a terminal:
 
 ```bash
 python netcast_hw_streamer.py --port 8000 --monitor 1 --fps 60 --height 1080 --bitrate 6M --encoder auto
 ```
 
-> **Wskazówka:** Upewnij się, że telewizor jest na zwykłym kanale TV lub wejściu HDMI (wyjdź z menu Smart Home / Przeglądarki przyciskiem `EXIT` na pilocie), aby telewizor automatycznie przyjął strumień przez `AVTransport1`.
+> **Tip:** Make sure the TV is on a regular TV channel or an HDMI input (leave the Smart Home / browser menu with the `EXIT` button on the remote) so the TV accepts the stream automatically via `AVTransport1`.
 
-### Skróty w oknie konsoli:
-- **`ENTER`** – Włącz / odśwież aktualny strumień na ekranie TV
-- **`1` + `ENTER`** – Monitor 1: Full HD `1080p @ 60 FPS` + Dźwięk
-- **`2` + `ENTER`** – Monitor 1: HD `720p Ultra-Low-Lag @ 60 FPS` + Dźwięk
-- **`3` + `ENTER`** – Monitor 2: Full HD `1080p @ 60 FPS` + Dźwięk
-- **`4` + `ENTER`** – Monitor 2: HD `720p Ultra-Low-Lag @ 60 FPS` + Dźwięk
+### Console window shortcuts:
+- **`ENTER`** – Start / refresh the current stream on the TV
+- **`1` + `ENTER`** – Monitor 1: Full HD `1080p @ 60 FPS` + audio
+- **`2` + `ENTER`** – Monitor 1: HD `720p Ultra-Low-Lag @ 60 FPS` + audio
+- **`3` + `ENTER`** – Monitor 2: Full HD `1080p @ 60 FPS` + audio
+- **`4` + `ENTER`** – Monitor 2: HD `720p Ultra-Low-Lag @ 60 FPS` + audio
