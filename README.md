@@ -16,6 +16,7 @@ Instead of the slow built-in WebKit browser, the project uses the TV's **native 
 - **Windows system audio capture (`PyAudioWPatch` / WASAPI Loopback):**
   - Sends audio straight from the default speakers/headphones, with no virtual audio cables to install.
   - Generates silence frames automatically when nothing is playing, keeping the MPEG-TS stream continuous.
+- **Constant delay:** The TV's playback position (AVTransport `GetPositionInfo`) gives the live PC-to-TV delay, shown in the GUI's status bar. Its tick rate calibrates the PC timer against the TV's clock (`clock_ratio` in `streamer_settings.json`; a PC timer running 0.19% fast made the delay grow ~7 s per hour). Delay that builds up anyway (e.g. after a Wi-Fi stall) is played off without interrupting the TV: the stream runs 0.5% faster (`Delay: … ↓`) until the delay is back to where playback started. Only a delay 5 s above it (e.g. after pausing the TV) restarts the TV's playback.
 - **Control from the PC console:** Switch monitors (`Monitor 1` / `Monitor 2`) and resolution (`1080p60` / `720p60`) on the fly with keys `1`–`4`.
 
 ---
@@ -39,7 +40,8 @@ An ultra-lightweight dark app window opens (fully compatible with **PowerToys Fa
 - pick a DLNA TV from the list of renderers found on the LAN,
 - switch the monitor on the fly (`Screen 1` / `Screen 2` / `Both`, or keys `F1` / `F2` / `F3`),
 - change the resolution (`1080p Full HD` / `720p Fast`), frame rate (`60 FPS` / `30 FPS`), bitrate and GPU encoder (`NVIDIA NVENC` / `AMD AMF` / `Intel QuickSync` / `CPU`),
-- start (`▶ START / SWITCH TO TV`) and stop (`⏹ STOP`) the stream.
+- start (`▶ START / SWITCH TO TV`) and stop (`⏹ STOP`) the stream,
+- see the current delay between the PC screen and the TV (bottom-right corner).
 
 ### 2. Console mode (CLI)
 Double-click **`run_console.bat`** or run from a terminal:

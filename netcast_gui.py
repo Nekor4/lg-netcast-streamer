@@ -100,6 +100,7 @@ class StreamerGUI:
         self.bitrate_var = tk.StringVar(value=saved.get("bitrate", "6M"))
         self.encoder_var = tk.StringVar(value=saved.get("encoder", "auto"))
         self.status_var = tk.StringVar(value="Initializing server...")
+        self.delay_var = tk.StringVar(value="Delay: –")
 
         valid_mons = [m[0] for m in self.monitors_info]
         if self.monitor_var.get() not in valid_mons and valid_mons:
@@ -110,6 +111,9 @@ class StreamerGUI:
         core.BROADCASTER.active_fps = self.fps_var.get()
         core.BROADCASTER.active_bitrate = self.bitrate_var.get()
         core.BROADCASTER.active_encoder = self.encoder_var.get()
+        # This PC's clock rate vs the TV's, measured by DelayMonitor in earlier sessions
+        core.BROADCASTER.clock_ratio = float(saved.get("clock_ratio", 1.0))
+        self._saved_clock_ratio = core.BROADCASTER.clock_ratio
 
         self.mon_buttons = {}
         self.res_buttons = {}
@@ -120,6 +124,7 @@ class StreamerGUI:
         self.root.bind("<F3>", lambda _e: self.select_monitor(0))
 
         core.BROADCASTER.status_callback = self.set_status
+        core.BROADCASTER.delay_callback = self.set_delay
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         threading.Thread(target=self._init_backend, daemon=True).start()
 
@@ -133,6 +138,7 @@ class StreamerGUI:
         return {}
 
     def _save_settings(self):
+        clock_ratio = core.BROADCASTER.clock_ratio
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(
@@ -144,9 +150,11 @@ class StreamerGUI:
                         "fps": self.fps_var.get(),
                         "bitrate": self.bitrate_var.get(),
                         "encoder": self.encoder_var.get(),
+                        "clock_ratio": clock_ratio,
                     },
                     f,
                 )
+            self._saved_clock_ratio = clock_ratio
         except Exception:
             pass
 
@@ -299,15 +307,26 @@ class StreamerGUI:
             command=self.stop_on_tv_async,
         ).grid(row=0, column=1, sticky="nsew")
 
-        # Row 5: lightweight status bar (event-driven updates only - 0% CPU when idle)
+        # Row 5: lightweight status bar + TV delay (event-driven updates only - 0% CPU when idle)
+        status_frame = tk.Frame(main, bg=self.BG)
+        status_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        status_frame.columnconfigure(0, weight=1)
         tk.Label(
-            main,
+            status_frame,
             textvariable=self.status_var,
             font=("Segoe UI", 8),
             bg=self.BG,
             fg=self.FG_DIM,
             anchor="w",
-        ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        ).grid(row=0, column=0, sticky="ew")
+        tk.Label(
+            status_frame,
+            textvariable=self.delay_var,
+            font=("Segoe UI", 8, "bold"),
+            bg=self.BG,
+            fg=self.FG,
+            anchor="e",
+        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
 
         self._refresh_button_colors()
 
@@ -345,6 +364,20 @@ class StreamerGUI:
         except Exception:
             pass
 
+    def set_delay(self, delay, catching_up=False):
+        if delay is None:
+            text = "Delay: –"
+        else:
+            # ↓ while the stream plays slightly fast to bring the delay back down
+            text = f"Delay: {delay:.1f} s" + (" ↓" if catching_up else "")
+        try:
+            self.root.after(0, lambda: self.delay_var.set(text))
+        except Exception:
+            pass
+        # Keep a new clock calibration for the next start
+        if abs(core.BROADCASTER.clock_ratio - self._saved_clock_ratio) > 1e-5:
+            self._save_settings()
+
     def _init_backend(self):
         self.set_status("Checking port 8000 and the GPU encoder...")
         free_port_if_in_use(self.port)
@@ -356,6 +389,7 @@ class StreamerGUI:
         self._scan_tvs_worker(initial_auto_push=True)
 
         threading.Thread(target=core.global_wasapi_capture_thread, daemon=True).start()
+        threading.Thread(target=core.DELAY_MONITOR.run, daemon=True).start()
         threading.Thread(
             target=core.ffmpeg_producer_loop,
             args=(
